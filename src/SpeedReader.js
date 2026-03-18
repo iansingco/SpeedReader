@@ -10,6 +10,35 @@ import {
   ScrollView,
 } from "react-native";
 import Slider from "@react-native-community/slider";
+// Web-safe slider wrapper
+function WpmSlider({ value, onValueChange, minimumTrackTintColor, maximumTrackTintColor, thumbTintColor, style }) {
+  if (Platform.OS === "web") {
+    return (
+      <input
+        type="range"
+        min={50}
+        max={1000}
+        step={10}
+        value={value}
+        onChange={e => onValueChange(Number(e.target.value))}
+        style={{ flex: 1, maxWidth: 260, accentColor: minimumTrackTintColor }}
+      />
+    );
+  }
+  return (
+    <Slider
+      style={style}
+      minimumValue={50}
+      maximumValue={1000}
+      step={10}
+      value={value}
+      onValueChange={onValueChange}
+      minimumTrackTintColor={minimumTrackTintColor}
+      maximumTrackTintColor={maximumTrackTintColor}
+      thumbTintColor={thumbTintColor}
+    />
+  );
+}
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 
@@ -222,11 +251,8 @@ export default function SpeedReader() {
         {/* ── WPM slider ── */}
         <View style={s.wpmRow}>
           <Text style={[s.wpmLabel, { color: t.muted, fontFamily: MONO }]}>WPM</Text>
-          <Slider
+          <WpmSlider
             style={s.slider}
-            minimumValue={50}
-            maximumValue={1000}
-            step={10}
             value={wpm}
             onValueChange={v => setWpm(Math.round(v))}
             minimumTrackTintColor={t.accent}
