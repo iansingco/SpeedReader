@@ -159,7 +159,7 @@ export default function SpeedReader() {
   // ── render ──────────────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={[s.safe, { backgroundColor: t.bg }]}>
+    <SafeAreaView style={[s.safe, { backgroundColor: t.bg, minHeight: Platform.OS === "web" ? "100vh" : undefined }]}>
       <StatusBar barStyle={theme === "light" ? "dark-content" : "light-content"} />
       <ScrollView
         contentContainerStyle={[s.container, { backgroundColor: t.bg }]}
