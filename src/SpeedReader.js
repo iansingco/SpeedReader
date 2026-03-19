@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -255,6 +255,16 @@ const THEMES = {
 
 const MONO = Platform.OS === "ios" ? "Courier" : "monospace";
 
+const WORD_COLORS = [
+  { value: null,      dot: null },   // theme default (accent + text)
+  { value: "#ffffff", dot: "#ffffff" },
+  { value: "#f0c040", dot: "#f0c040" },
+  { value: "#4ade80", dot: "#4ade80" },
+  { value: "#60a5fa", dot: "#60a5fa" },
+  { value: "#f472b6", dot: "#f472b6" },
+  { value: "#fb923c", dot: "#fb923c" },
+];
+
 // ── component ─────────────────────────────────────────────────────────────────
 
 export default function SpeedReader() {
@@ -271,10 +281,34 @@ export default function SpeedReader() {
   const [finished, setFinished]   = useState(false);
   const [loading, setLoading]     = useState(false);
   const [parseError, setParseError] = useState(null);
+  const [wordColor, setWordColor] = useState(null);   // null = theme default
+  const [skipAmount, setSkipAmount] = useState(20);   // number or "sentence"
 
   const intervalRef = useRef(null);
   const t = THEMES[theme];
   const delay = Math.round((60 / wpm) * 1000 * chunkSize);
+
+  // Indices where sentences end (word ends with . ! ?)
+  const sentenceBounds = useMemo(
+    () => words.reduce((acc, w, i) => (/[.!?]["'\u201d]?$/.test(w) ? [...acc, i] : acc), []),
+    [words]
+  );
+
+  const skipBy = useCallback((dir) => {
+    setIndex(prev => {
+      if (skipAmount === "sentence") {
+        if (dir > 0) {
+          const next = sentenceBounds.find(b => b > prev);
+          return next !== undefined ? Math.min(next + 1, words.length - 1) : words.length - 1;
+        } else {
+          const behind = sentenceBounds.filter(b => b < prev - 1);
+          const target = behind[behind.length - 2]; // start of sentence before current
+          return target !== undefined ? target + 1 : 0;
+        }
+      }
+      return Math.max(0, Math.min(words.length - 1, prev + dir * skipAmount));
+    });
+  }, [skipAmount, sentenceBounds, words.length]);
 
   // ── playback ────────────────────────────────────────────────────────────────
 
@@ -425,8 +459,8 @@ export default function SpeedReader() {
             </View>
           ) : (
             <Text style={[s.orp, { fontSize }]} selectable={false}>
-              <Text style={{ color: t.accent, fontWeight: "700" }}>{bold}</Text>
-              <Text style={{ color: t.text,   fontWeight: "400" }}>{post}</Text>
+              <Text style={{ color: wordColor ?? t.accent, fontWeight: "700" }}>{bold}</Text>
+              <Text style={{ color: wordColor ?? t.text,   fontWeight: "400" }}>{post}</Text>
             </Text>
           )}
           <Text style={[s.wordCount, { color: t.muted, fontFamily: MONO }]}>
@@ -446,12 +480,12 @@ export default function SpeedReader() {
             t={t}
             onPress={() => { stop(); setIndex(0); setProgress(0); setFinished(false); }}
           />
-          <Ctrl label="‹‹" t={t} onPress={() => setIndex(i => Math.max(0, i - 20))} />
+          <Ctrl label="‹‹" t={t} onPress={() => skipBy(-1)} />
           {playing
             ? <Ctrl label="⏸ Pause" t={t} active onPress={stop} />
             : <Ctrl label="▶  Play"  t={t} active onPress={play} />
           }
-          <Ctrl label="››" t={t} onPress={() => setIndex(i => Math.min(words.length - 1, i + 20))} />
+          <Ctrl label="››" t={t} onPress={() => skipBy(1)} />
         </View>
 
         {/* ── WPM slider ── */}
@@ -473,23 +507,37 @@ export default function SpeedReader() {
           <View style={[s.settingsPanel, { backgroundColor: t.surface }]}>
             <SettingRow label="FONT SIZE" t={t}>
               {[32, 40, 48, 60, 72].map(sz => (
-                <Chip
-                  key={sz}
-                  label={String(sz)}
-                  active={fontSize === sz}
-                  t={t}
-                  onPress={() => setFontSize(sz)}
-                />
+                <Chip key={sz} label={String(sz)} active={fontSize === sz} t={t} onPress={() => setFontSize(sz)} />
               ))}
             </SettingRow>
             <SettingRow label="WORDS PER FLASH" t={t}>
               {[1, 2, 3].map(n => (
+                <Chip key={n} label={String(n)} active={chunkSize === n} t={t} onPress={() => setChunkSize(n)} />
+              ))}
+            </SettingRow>
+            <SettingRow label="FONT COLOR" t={t}>
+              {WORD_COLORS.map(({ value, dot }) => (
+                <TouchableOpacity
+                  key={value ?? "default"}
+                  onPress={() => setWordColor(value)}
+                  style={[
+                    s.colorDot,
+                    {
+                      backgroundColor: dot ?? t.accent,
+                      borderColor: wordColor === value ? t.text : "transparent",
+                    },
+                  ]}
+                />
+              ))}
+            </SettingRow>
+            <SettingRow label="SKIP AMOUNT" t={t}>
+              {[10, 20, 50, "sentence"].map(n => (
                 <Chip
-                  key={n}
-                  label={String(n)}
-                  active={chunkSize === n}
+                  key={String(n)}
+                  label={n === "sentence" ? "sentence" : `${n}w`}
+                  active={skipAmount === n}
                   t={t}
-                  onPress={() => setChunkSize(n)}
+                  onPress={() => setSkipAmount(n)}
                 />
               ))}
             </SettingRow>
@@ -620,6 +668,7 @@ const s = StyleSheet.create({
   },
   settingRow:    { gap: 6 },
   settingLabel:  { fontSize: 11, letterSpacing: 2, textTransform: "uppercase" },
-  settingControl:{ flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  settingControl:{ flexDirection: "row", gap: 8, flexWrap: "wrap", alignItems: "center" },
   chipBtn:       { paddingHorizontal: 14, paddingVertical: 4, borderRadius: 6, borderWidth: 1 },
+  colorDot:      { width: 24, height: 24, borderRadius: 12, borderWidth: 2.5 },
 });
