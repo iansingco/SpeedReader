@@ -110,6 +110,112 @@ async function parseEPUB(uri) {
   return parts.join(" ");
 }
 
+// PalmDOC LZ77 decompression
+function decompressPalmDOC(data) {
+  const out = [];
+  let i = 0;
+  while (i < data.length) {
+    const c = data[i++];
+    if (c === 0x00) {
+      out.push(0x00);
+    } else if (c <= 0x08) {
+      for (let j = 0; j < c; j++) out.push(data[i++]);
+    } else if (c <= 0x7F) {
+      out.push(c);
+    } else if (c <= 0xBF) {
+      const n = data[i++];
+      const dist = ((c & 0x3F) << 5) | (n >> 3);
+      const len  = (n & 0x7) + 3;
+      const base = out.length - dist;
+      for (let j = 0; j < len; j++) out.push(base + j >= 0 ? out[base + j] : 0x20);
+    } else {
+      out.push(0x20);        // space
+      out.push(c & 0x7F);
+    }
+  }
+  return new Uint8Array(out);
+}
+
+// Strip trailing bytes added by newer MOBI encoders
+function stripMobiTrailing(record, extraDataFlags) {
+  if (!extraDataFlags) return record;
+  let end = record.length;
+  if (extraDataFlags & 1) end -= (record[end - 1] & 0x3) + 1;
+  return record.slice(0, Math.max(0, end));
+}
+
+async function parseMOBI(uri) {
+  let buffer;
+  if (Platform.OS === "web") {
+    buffer = await (await fetch(uri)).arrayBuffer();
+  } else {
+    const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    buffer = bytes.buffer;
+  }
+
+  const bytes = new Uint8Array(buffer);
+  const dv    = new DataView(buffer);
+
+  // Validate PalmDB header magic
+  const dbType    = String.fromCharCode(bytes[60], bytes[61], bytes[62], bytes[63]);
+  const dbCreator = String.fromCharCode(bytes[64], bytes[65], bytes[66], bytes[67]);
+  if (dbType !== "BOOK" || dbCreator !== "MOBI") throw new Error("Not a valid MOBI file.");
+
+  const numRecords = dv.getUint16(76);
+  const recOffsets = [];
+  for (let i = 0; i < numRecords; i++) recOffsets.push(dv.getUint32(78 + i * 8));
+  recOffsets.push(buffer.byteLength); // sentinel
+
+  // Record 0 = PalmDOC header (bytes 0-15) + MOBI header (bytes 16+)
+  const r0 = recOffsets[0];
+  const compression     = dv.getUint16(r0 + 0);
+  const textRecordCount = dv.getUint16(r0 + 8);
+  const encryption      = dv.getUint16(r0 + 12);
+
+  if (encryption !== 0)
+    throw new Error("DRM-protected MOBI files cannot be read.");
+  if (compression === 17480)  // 0x4448 = HUFF/CDIC used by AZW3/KF8
+    throw new Error("AZW3/KF8 Huffman compression is not supported.\nConvert to EPUB using Calibre (calibre-ebook.com).");
+  if (compression !== 1 && compression !== 2)
+    throw new Error(`Unsupported MOBI compression type: ${compression}.`);
+
+  const mobiMagic = String.fromCharCode(bytes[r0+16], bytes[r0+17], bytes[r0+18], bytes[r0+19]);
+  if (mobiMagic !== "MOBI") throw new Error("Invalid MOBI header.");
+
+  const mobiLen  = dv.getUint32(r0 + 20); // MOBI header length
+  const encoding = dv.getUint32(r0 + 28); // 65001 = UTF-8, 1252 = CP1252
+
+  // extraDataFlags tells us how many trailing bytes to strip from each text record
+  let extraDataFlags = 0;
+  if (mobiLen >= 228) extraDataFlags = dv.getUint16(r0 + 16 + 226);
+
+  const decoder = new TextDecoder(encoding === 65001 ? "utf-8" : "windows-1252");
+  const parts   = [];
+
+  for (let i = 1; i <= textRecordCount && i < recOffsets.length - 1; i++) {
+    let record     = bytes.slice(recOffsets[i], recOffsets[i + 1]);
+    record         = stripMobiTrailing(record, extraDataFlags);
+    const raw      = compression === 2 ? decompressPalmDOC(record) : record;
+    const text     = decoder.decode(raw)
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text) parts.push(text);
+  }
+
+  if (!parts.length) throw new Error("No readable text found in MOBI file.");
+  return parts.join(" ");
+}
+
 async function parseFile(asset) {
   const ext = asset.name.split(".").pop().toLowerCase();
   if (ext === "pdf") {
@@ -117,11 +223,8 @@ async function parseFile(asset) {
     return parsePDF(asset.uri);
   }
   if (ext === "epub") return parseEPUB(asset.uri);
-  if (["mobi", "azw", "azw3"].includes(ext)) {
-    throw new Error(
-      "MOBI/AZW3 cannot be parsed directly.\nConvert to EPUB first using Calibre (free, calibre-ebook.com)."
-    );
-  }
+  if (ext === "mobi" || ext === "azw") return parseMOBI(asset.uri);
+  if (ext === "azw3") throw new Error("AZW3 uses KF8/Huffman compression and cannot be parsed.\nConvert to EPUB using Calibre (calibre-ebook.com).");
   if (Platform.OS === "web") return (await fetch(asset.uri)).text();
   return FileSystem.readAsStringAsync(asset.uri);
 }
@@ -215,9 +318,9 @@ export default function SpeedReader() {
           "text/plain", "text/markdown",
           "application/pdf",
           "application/epub+zip",
-          "application/x-mobipocket-ebook",
-          "application/vnd.amazon.ebook",
-          "application/x-mobi8-ebook",
+          "application/x-mobipocket-ebook",  // .mobi
+          "application/vnd.amazon.ebook",    // .azw
+          "application/x-mobi8-ebook",       // .azw3 (will show error)
         ],
         copyToCacheDirectory: true,
       });
@@ -296,7 +399,7 @@ export default function SpeedReader() {
               : "Tap to open a .txt, .md, or .epub file"}
           </Text>
           <Text style={[s.dropText, { color: t.muted, fontSize: 11, marginTop: 4 }]}>
-            {Platform.OS === "web" ? "PDF, EPUB supported · MOBI/AZW3: convert to EPUB first" : "EPUB supported · PDF on web only · MOBI/AZW3: convert to EPUB"}
+            {Platform.OS === "web" ? "PDF, EPUB, MOBI supported · AZW3: convert to EPUB first" : "EPUB, MOBI supported · PDF on web only · AZW3: convert to EPUB"}
           </Text>
           {loading && (
             <Text style={[s.dropText, { color: t.accent, fontSize: 11, marginTop: 6 }]}>
