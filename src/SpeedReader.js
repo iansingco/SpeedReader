@@ -42,6 +42,90 @@ function WpmSlider({ value, onValueChange, minimumTrackTintColor, maximumTrackTi
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 
+// ── file parsers ──────────────────────────────────────────────────────────────
+
+async function parsePDF(uri) {
+  const pdfjsLib = await import("pdfjs-dist");
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+  const response = await fetch(uri);
+  const data = await response.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    pages.push(content.items.map(item => item.str).join(" "));
+  }
+  return pages.join("\n");
+}
+
+async function parseEPUB(uri) {
+  const { default: JSZip } = await import("jszip");
+  let buffer;
+  if (Platform.OS === "web") {
+    buffer = await (await fetch(uri)).arrayBuffer();
+  } else {
+    const b64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    buffer = bytes.buffer;
+  }
+  const zip = await JSZip.loadAsync(buffer);
+  const containerXml = await zip.file("META-INF/container.xml")?.async("string");
+  if (!containerXml) throw new Error("Invalid EPUB file.");
+  const opfPath = containerXml.match(/full-path="([^"]+)"/)?.[1];
+  if (!opfPath) throw new Error("Malformed EPUB: no OPF path.");
+  const opfDir = opfPath.includes("/") ? opfPath.substring(0, opfPath.lastIndexOf("/") + 1) : "";
+  const opf = await zip.file(opfPath)?.async("string");
+  if (!opf) throw new Error("Cannot read EPUB package.");
+  const manifest = Object.fromEntries(
+    [...opf.matchAll(/<item\s[^>]*\bid="([^"]+)"[^>]*\bhref="([^"]+)"/gi)].map(m => [m[1], m[2]])
+  );
+  const spine = [...opf.matchAll(/<itemref\s[^>]*\bidref="([^"]+)"/gi)]
+    .map(m => manifest[m[1]])
+    .filter(Boolean);
+  const parts = [];
+  for (const href of spine) {
+    const html = await (zip.file(opfDir + href) ?? zip.file(href))?.async("string");
+    if (!html) continue;
+    const text = html
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text) parts.push(text);
+  }
+  if (!parts.length) throw new Error("No readable text found in EPUB.");
+  return parts.join(" ");
+}
+
+async function parseFile(asset) {
+  const ext = asset.name.split(".").pop().toLowerCase();
+  if (ext === "pdf") {
+    if (Platform.OS !== "web") throw new Error("PDF parsing is only supported on web.");
+    return parsePDF(asset.uri);
+  }
+  if (ext === "epub") return parseEPUB(asset.uri);
+  if (["mobi", "azw", "azw3"].includes(ext)) {
+    throw new Error(
+      "MOBI/AZW3 cannot be parsed directly.\nConvert to EPUB first using Calibre (free, calibre-ebook.com)."
+    );
+  }
+  if (Platform.OS === "web") return (await fetch(asset.uri)).text();
+  return FileSystem.readAsStringAsync(asset.uri);
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function tokenize(text) {
@@ -82,6 +166,8 @@ export default function SpeedReader() {
   const [theme, setTheme]         = useState("dark");
   const [chunkSize, setChunkSize] = useState(1);
   const [finished, setFinished]   = useState(false);
+  const [loading, setLoading]     = useState(false);
+  const [parseError, setParseError] = useState(null);
 
   const intervalRef = useRef(null);
   const t = THEMES[theme];
@@ -125,27 +211,34 @@ export default function SpeedReader() {
   const pickFile = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ["text/plain", "text/markdown"],
+        type: [
+          "text/plain", "text/markdown",
+          "application/pdf",
+          "application/epub+zip",
+          "application/x-mobipocket-ebook",
+          "application/vnd.amazon.ebook",
+          "application/x-mobi8-ebook",
+        ],
         copyToCacheDirectory: true,
       });
       if (result.canceled) return;
       const asset = result.assets[0];
       stop();
       setFileName(asset.name);
-
-      let text;
-      if (Platform.OS === "web") {
-        // On web the URI is a blob / data URL — fetch handles both.
-        const response = await fetch(asset.uri);
-        text = await response.text();
-      } else {
-        text = await FileSystem.readAsStringAsync(asset.uri);
+      setParseError(null);
+      setLoading(true);
+      try {
+        const text = await parseFile(asset);
+        setWords(tokenize(text));
+        setIndex(0);
+        setProgress(0);
+        setFinished(false);
+      } catch (err) {
+        setParseError(err.message);
+        console.error("Parse error:", err);
+      } finally {
+        setLoading(false);
       }
-
-      setWords(tokenize(text));
-      setIndex(0);
-      setProgress(0);
-      setFinished(false);
     } catch (err) {
       console.error("File pick error:", err);
     }
@@ -199,12 +292,22 @@ export default function SpeedReader() {
         >
           <Text style={[s.dropText, { color: t.muted }]}>
             {Platform.OS === "web"
-              ? "Drop a .txt / .md file here, or click to browse"
-              : "Tap to open a .txt or .md file"}
+              ? "Drop a .txt / .md / .pdf / .epub here, or click to browse"
+              : "Tap to open a .txt, .md, or .epub file"}
           </Text>
           <Text style={[s.dropText, { color: t.muted, fontSize: 11, marginTop: 4 }]}>
-            PDF &amp; MOBI parsing coming soon
+            {Platform.OS === "web" ? "PDF, EPUB supported · MOBI/AZW3: convert to EPUB first" : "EPUB supported · PDF on web only · MOBI/AZW3: convert to EPUB"}
           </Text>
+          {loading && (
+            <Text style={[s.dropText, { color: t.accent, fontSize: 11, marginTop: 6 }]}>
+              Parsing file…
+            </Text>
+          )}
+          {parseError && (
+            <Text style={[s.dropText, { color: "#e05050", fontSize: 11, marginTop: 6, textAlign: "center" }]}>
+              {parseError}
+            </Text>
+          )}
           <Text style={[s.fileName, { color: t.accent, fontFamily: MONO }]}>{fileName}</Text>
         </TouchableOpacity>
 
