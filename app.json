@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "SwiftRead",
+    "slug": "swiftread",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.swiftread.app"
+    },
+    "android": {
+      "package": "com.swiftread.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0a0f"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-document-picker"
+    ]
+  }
+}

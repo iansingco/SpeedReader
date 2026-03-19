@@ -1,0 +1,28 @@
+{
+  "name": "swiftread",
+  "version": "1.0.0",
+  "main": "App.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@react-native-community/slider": "5.1.2",
+    "expo": "~55.0.0",
+    "expo-document-picker": "~55.0.9",
+    "expo-file-system": "~55.0.11",
+    "expo-status-bar": "~55.0.4",
+    "jszip": "^3.10.1",
+    "pdfjs-dist": "^5.5.207",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.2",
+    "react-native-web": "~0.21.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "babel-preset-expo": "~55.0.8"
+  }
+}
