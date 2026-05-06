@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "postinstall": "node scripts/copy-pdf-worker.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^3.0.2",

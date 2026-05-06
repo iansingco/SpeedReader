@@ -54,8 +54,7 @@ function htmlToText(html) {
 
 async function parsePDF(uri) {
   const pdfjsLib = await import("pdfjs-dist");
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
   const data = await (await fetch(uri)).arrayBuffer();
   const pdf  = await pdfjsLib.getDocument({ data }).promise;

@@ -4,3 +4,4 @@ dist/
 web-build/
 *.orig
 .env
+web/pdf.worker.min.mjs
