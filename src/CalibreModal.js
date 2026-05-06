@@ -36,7 +36,7 @@ async function blobToDataUrl(blob) {
 // ── CalibreModal ──────────────────────────────────────────────────────────────
 
 export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
-  const [url,        setUrl]        = useState("http://localhost:8080");
+  const [url,        setUrl]        = useState("http://localhost:8082");
   const [username,   setUsername]   = useState("");
   const [password,   setPassword]   = useState("");
   const [connecting, setConnecting] = useState(false);
