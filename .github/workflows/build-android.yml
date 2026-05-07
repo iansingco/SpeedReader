@@ -1,0 +1,35 @@
+name: Build Android APK
+
+on:
+  push:
+    tags:
+      - "v*"          # trigger on version tags like v1.0.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm install
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build APK
+        run: eas build --platform android --profile preview --non-interactive
+
+      - name: Download and attach APK to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          url=$(eas build:list --platform android --limit 1 --json --non-interactive | node -e "const d=require('fs').readFileSync('/dev/stdin','utf8');console.log(JSON.parse(d)[0].artifacts.buildUrl)")
+          curl -L "$url" -o swiftread.apk
+          gh release upload ${{ github.ref_name }} swiftread.apk
