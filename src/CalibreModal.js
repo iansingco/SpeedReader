@@ -35,8 +35,14 @@ async function blobToDataUrl(blob) {
 
 // ── CalibreModal ──────────────────────────────────────────────────────────────
 
+// On web, default to the local CORS proxy (npm run proxy).
+// On native, CORS doesn't apply — connect directly.
+const DEFAULT_URL = Platform.OS === "web"
+  ? "http://localhost:8083"
+  : "http://localhost:8082";
+
 export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
-  const [url,        setUrl]        = useState("http://localhost:8082");
+  const [url,        setUrl]        = useState(DEFAULT_URL);
   const [username,   setUsername]   = useState("");
   const [password,   setPassword]   = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -52,7 +58,7 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
     if (!visible) return;
     getCalibreConfig().then(cfg => {
       if (cfg) {
-        setUrl(cfg.url || "http://localhost:8080");
+        setUrl(cfg.url || DEFAULT_URL);
         setUsername(cfg.username || "");
         // Don't restore password for security
         setConnected(false);
@@ -211,6 +217,29 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
           </View>
 
           <ScrollView contentContainerStyle={ms.body} keyboardShouldPersistTaps="handled">
+
+            {/* Web proxy banner */}
+            {Platform.OS === "web" && (
+              <View style={[ms.proxyBanner, { backgroundColor: t.surface, borderColor: t.accent + "44" }]}>
+                <Text style={[ms.proxyTitle, { color: t.accent, fontFamily: MONO }]}>
+                  ⚠ Web browser detected
+                </Text>
+                <Text style={[ms.proxyBody, { color: t.muted }]}>
+                  Browsers block direct Calibre requests (CORS). Run this in a second terminal:
+                </Text>
+                <View style={[ms.codeBlock, { backgroundColor: t.bg }]}>
+                  <Text style={[ms.codeText, { color: t.accent, fontFamily: MONO }]}>
+                    npm run proxy
+                  </Text>
+                </View>
+                <Text style={[ms.proxyBody, { color: t.muted }]}>
+                  Then connect to{" "}
+                  <Text style={{ color: t.text, fontFamily: MONO }}>http://localhost:8083</Text>
+                  {" "}(the proxy forwards to Calibre on 8082).{"\n"}
+                  On the native iOS/Android app this step is not needed.
+                </Text>
+              </View>
+            )}
 
             {/* Connection form */}
             {!connected && (
@@ -387,6 +416,17 @@ const ms = StyleSheet.create({
     alignItems: "center",
   },
   hint: { fontSize: 12, lineHeight: 18, marginTop: 16 },
+
+  proxyBanner: {
+    borderWidth: 1, borderRadius: 10,
+    padding: 14, marginBottom: 20, gap: 8,
+  },
+  proxyTitle: { fontSize: 12, letterSpacing: 1 },
+  proxyBody:  { fontSize: 12, lineHeight: 18 },
+  codeBlock: {
+    borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8,
+  },
+  codeText: { fontSize: 13 },
 
   connectedRow: {
     flexDirection: "row", justifyContent: "space-between",
