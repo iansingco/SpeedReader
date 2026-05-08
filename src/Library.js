@@ -19,6 +19,7 @@ import { THEMES, MONO } from "./constants";
 import * as storage from "./storage";
 import { parseFile, tokenize, makeBookId } from "./parsers";
 import CalibreModal from "./CalibreModal";
+import ThemeDropdown from "./ThemeDropdown";
 
 const ACCEPTED_TYPES = [
   "text/plain",
@@ -213,8 +214,17 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
     setLoading(true);
     setLoadingName(title || name);
     try {
-      const asset  = { uri, name: name || `${title}.epub` };
+      // On web, download to a blob URL first so the parser gets a stable
+      // local reference rather than re-fetching through the proxy.
+      let parseUri = uri;
+      if (Platform.OS === "web") {
+        const res = await fetch(uri);
+        if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
+        parseUri = URL.createObjectURL(await res.blob());
+      }
+      const asset  = { uri: parseUri, name: name || `${title}.epub` };
       const { text, meta, annotations } = await parseFile(asset);
+      if (Platform.OS === "web" && parseUri !== uri) URL.revokeObjectURL(parseUri);
       const words  = tokenize(text);
       const bookId = calibreId ? `calibre_${calibreId}` : makeBookId(name);
 
@@ -263,17 +273,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
       <View style={[cs.header, { borderBottomColor: t.muted + "44" }]}>
         <Text style={[cs.logo, { color: t.accent, fontFamily: MONO }]}>⚡ SwiftRead</Text>
         <View style={cs.headerRight}>
-          {["dark", "sepia", "light"].map(th => (
-            <TouchableOpacity
-              key={th}
-              style={[cs.iconBtn, { borderColor: t.muted + "88" }]}
-              onPress={() => onChangeTheme(th)}
-            >
-              <Text style={{ color: theme === th ? t.accent : t.muted, fontSize: 14 }}>
-                {th === "dark" ? "◐" : th === "sepia" ? "☕" : "○"}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          <ThemeDropdown theme={theme} onChange={onChangeTheme} t={t} />
           <TouchableOpacity
             style={[cs.iconBtn, { borderColor: t.muted + "88" }]}
             onPress={() => setShowCalibre(true)}

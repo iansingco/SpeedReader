@@ -53,44 +53,48 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
   const [error,      setError]      = useState(null);
   const [importing,  setImporting]  = useState({});
 
-  // Restore saved config on open
+  // Restore saved config and auto-reconnect on open
   useEffect(() => {
     if (!visible) return;
     getCalibreConfig().then(cfg => {
-      if (cfg) {
-        setUrl(cfg.url || DEFAULT_URL);
-        setUsername(cfg.username || "");
-        // Don't restore password for security
+      if (cfg?.url) {
+        const savedUrl  = cfg.url;
+        const savedUser = cfg.username || "";
+        setUrl(savedUrl);
+        setUsername(savedUser);
         setConnected(false);
         setBooks([]);
+        // Auto-reconnect silently using saved credentials
+        connectWith(savedUrl, savedUser, "");
       }
     });
   }, [visible]);
 
-  const headers = () => basicAuthHeader(username, password);
+  const headers = (u = username, p = password) => basicAuthHeader(u, p);
 
   // ── connect ──────────────────────────────────────────────────────────────────
 
-  const connect = async () => {
+  // connectWith accepts explicit params so auto-reconnect works without
+  // waiting for React state to flush.
+  const connectWith = async (serverUrl, user, pass) => {
     setConnecting(true);
     setError(null);
+    const base = serverUrl.replace(/\/$/, "");
     try {
-      const res = await fetch(`${url.replace(/\/$/, "")}/ajax/library-info`, {
-        headers: headers(),
-      });
+      const res  = await fetch(`${base}/ajax/library-info`, { headers: headers(user, pass) });
       if (!res.ok) throw new Error(`Server returned HTTP ${res.status}`);
       const info = await res.json();
       const lib  = info.default_library || Object.keys(info.library_map || {})[0] || "Calibre_Library";
       setLibraryId(lib);
       setConnected(true);
-      await saveCalibreConfig({ url: url.replace(/\/$/, ""), username });
-      fetchBooks(lib);
+      await saveCalibreConfig({ url: base, username: user });
+      fetchBooks(lib, base, user, pass);
     } catch (e) {
       const msg = e.message || String(e);
       if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("CORS")) {
         setError(
           "Could not reach Calibre server.\n\n" +
-          "On web browsers, you must enable \"Allow CORS\" in Calibre → Preferences → Sharing → Content Server → Advanced.\n\n" +
+          "On web, run  npm run proxy  in a second terminal, then use http://localhost:8083.\n\n" +
           "On the native app, make sure the server URL is reachable on your network."
         );
       } else {
@@ -101,17 +105,17 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
     }
   };
 
+  const connect = () => connectWith(url, username, password);
+
   // ── fetch book list ───────────────────────────────────────────────────────────
 
-  const fetchBooks = async (libId) => {
+  const fetchBooks = async (libId, base = url.replace(/\/$/, ""), user = username, pass = password) => {
     setLoading(true);
     setError(null);
-    const base = url.replace(/\/$/, "");
     try {
-      // Search returns up to 100 book IDs
       const searchRes  = await fetch(
         `${base}/ajax/search?num=100&sort=title&library_id=${encodeURIComponent(libId)}`,
-        { headers: headers() }
+        { headers: headers(user, pass) }
       );
       if (!searchRes.ok) throw new Error(`Search failed: HTTP ${searchRes.status}`);
       const searchData = await searchRes.json();
@@ -120,21 +124,19 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
 
       const booksRes  = await fetch(
         `${base}/ajax/books?ids=${ids.join(",")}&fields=title,authors,cover&library_id=${encodeURIComponent(libId)}`,
-        { headers: headers() }
+        { headers: headers(user, pass) }
       );
       if (!booksRes.ok) throw new Error(`Books fetch failed: HTTP ${booksRes.status}`);
       const booksData = await booksRes.json();
 
       setBooks(
         Object.entries(booksData).map(([id, d]) => ({
-          calibreId:  id,
-          title:      d.title  || "Unknown",
-          author:     Array.isArray(d.authors) ? d.authors[0] : (d.authors || ""),
-          hasCover:   !!d.cover,
-          coverUrl:   d.cover
-            ? `${base}/get/cover/${id}/${encodeURIComponent(libId)}`
-            : null,
-          epubUrl:    `${base}/get/EPUB/${id}/${encodeURIComponent(libId)}`,
+          calibreId: id,
+          title:     d.title  || "Unknown",
+          author:    Array.isArray(d.authors) ? d.authors[0] : (d.authors || ""),
+          hasCover:  !!d.cover,
+          coverUrl:  d.cover ? `${base}/get/cover/${id}/${encodeURIComponent(libId)}` : null,
+          epubUrl:   `${base}/get/EPUB/${id}/${encodeURIComponent(libId)}`,
         }))
       );
     } catch (e) {

@@ -15,6 +15,7 @@ import {
 import Slider from "@react-native-community/slider";
 import * as DocumentPicker from "expo-document-picker";
 import { THEMES, MONO, WORD_COLORS } from "./constants";
+import ThemeDropdown from "./ThemeDropdown";
 import { parseFile, tokenize, highlightWord, makeBookId } from "./parsers";
 import * as storage from "./storage";
 
@@ -286,17 +287,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
             </Text>
           </View>
           <View style={s.headerRight}>
-            {["dark", "sepia", "light"].map(th => (
-              <TouchableOpacity
-                key={th}
-                style={[s.iconBtn, { borderColor: t.muted + "88" }]}
-                onPress={() => setTheme(th)}
-              >
-                <Text style={{ color: theme === th ? t.accent : t.muted, fontSize: 14 }}>
-                  {th === "dark" ? "◐" : th === "sepia" ? "☕" : "○"}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <ThemeDropdown theme={theme} onChange={setTheme} t={t} />
             <TouchableOpacity
               style={[s.iconBtn, { borderColor: t.muted + "88" }]}
               onPress={() => setShowSettings(v => !v)}
