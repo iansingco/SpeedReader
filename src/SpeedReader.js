@@ -77,10 +77,16 @@ export default function SpeedReader({ book, onBack, onProgress }) {
 
   // ── annotation state ─────────────────────────────────────────────────────────
   const [annotations,       setAnnotations]       = useState(book?.annotations || {});
-  const [showAnnotation,    setShowAnnotation]     = useState(null); // current popup
+  const [showAnnotation,    setShowAnnotation]     = useState(null);
   const [showAnnotateModal, setShowAnnotateModal]  = useState(false);
   const [annNote,           setAnnNote]            = useState("");
   const [annLink,           setAnnLink]            = useState("");
+
+  // ── context panel + jump-to-word ─────────────────────────────────────────────
+  const [showContext,     setShowContext]     = useState(false);
+  const [showJumpModal,   setShowJumpModal]   = useState(false);
+  const [jumpInput,       setJumpInput]       = useState("");
+  const contextScrollRef = useRef(null);
 
   // bookId drives storage persistence
   const bookId = book?.id || makeBookId(fileName);
@@ -345,12 +351,16 @@ export default function SpeedReader({ book, onBack, onProgress }) {
               <Text style={{ color: wordColor ?? t.text,   fontWeight: "400" }}>{post}</Text>
             </Text>
           )}
-          <Text
-            style={[s.wordCount, { color: hasAnnotation ? t.accent : t.muted, fontFamily: MONO }]}
+          {/* Word counter — tap to open jump-to-word */}
+          <TouchableOpacity
+            style={s.wordCountBtn}
+            onPress={() => { setJumpInput(String(index + 1)); setShowJumpModal(true); }}
+            activeOpacity={0.6}
           >
-            {hasAnnotation ? "✦ " : ""}{index + 1} / {words.length}
-          </Text>
-          {/* Annotation indicator dot */}
+            <Text style={[s.wordCount, { color: hasAnnotation ? t.accent : t.muted, fontFamily: MONO }]}>
+              {hasAnnotation ? "✦ " : ""}{index + 1} / {words.length}
+            </Text>
+          </TouchableOpacity>
           {hasAnnotation && !showAnnotation && (
             <TouchableOpacity
               style={[s.annDot, { backgroundColor: t.accent }]}
@@ -398,6 +408,17 @@ export default function SpeedReader({ book, onBack, onProgress }) {
           </View>
         )}
 
+        {/* ── Context panel ── */}
+        {showContext && (
+          <ContextPanel
+            words={words}
+            currentIndex={index}
+            t={t}
+            scrollRef={contextScrollRef}
+            onJump={(i) => { stop(); setIndex(i); setShowAnnotation(null); }}
+          />
+        )}
+
         {/* ── Progress bar ── */}
         <View style={[s.progressWrap, { backgroundColor: t.muted + "44" }]}>
           <View style={[s.progressBar, { backgroundColor: t.accent, width: `${progress}%` }]} />
@@ -412,6 +433,12 @@ export default function SpeedReader({ book, onBack, onProgress }) {
             : <Ctrl label="▶  Play"  t={t} active onPress={play} />
           }
           <Ctrl label="››" t={t} onPress={() => skipBy(1)} />
+          <Ctrl
+            label={showContext ? "▲ ctx" : "▼ ctx"}
+            t={t}
+            active={showContext}
+            onPress={() => setShowContext(v => !v)}
+          />
           <Ctrl
             label="✦ Ann"
             t={t}
@@ -438,7 +465,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
         {showSettings && (
           <View style={[s.settingsPanel, { backgroundColor: t.surface }]}>
             <SettingRow label="FONT SIZE" t={t}>
-              {[32, 40, 48, 60, 72].map(sz => (
+              {[32, 40, 48, 60, 72, 80, 100, 120].map(sz => (
                 <Chip key={sz} label={String(sz)} active={fontSize === sz} t={t} onPress={() => setFontSize(sz)} />
               ))}
             </SettingRow>
@@ -534,6 +561,57 @@ export default function SpeedReader({ book, onBack, onProgress }) {
           </View>
         </View>
       </Modal>
+
+      {/* ── Jump-to-word modal ── */}
+      <Modal
+        visible={showJumpModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowJumpModal(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={[s.modalBox, { backgroundColor: t.surface }]}>
+            <Text style={[s.modalTitle, { color: t.text, fontFamily: MONO }]}>
+              Go to Word
+            </Text>
+            <Text style={[s.modalSub, { color: t.muted, fontFamily: MONO }]}>
+              1 – {words.length}
+            </Text>
+            <TextInput
+              style={[s.textInput, { color: t.text, borderColor: t.muted + "55", backgroundColor: t.bg }]}
+              keyboardType="numeric"
+              value={jumpInput}
+              onChangeText={setJumpInput}
+              placeholder={String(index + 1)}
+              placeholderTextColor={t.muted}
+              autoFocus
+              selectTextOnFocus
+            />
+            <View style={s.modalActions}>
+              <TouchableOpacity
+                style={[s.modalBtn, { borderColor: t.muted + "55" }]}
+                onPress={() => setShowJumpModal(false)}
+              >
+                <Text style={{ color: t.muted, fontFamily: MONO }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.modalBtn, { backgroundColor: t.accent, borderColor: t.accent }]}
+                onPress={() => {
+                  const n = parseInt(jumpInput, 10);
+                  if (!isNaN(n)) {
+                    stop();
+                    setIndex(Math.max(0, Math.min(words.length - 1, n - 1)));
+                    setShowAnnotation(null);
+                  }
+                  setShowJumpModal(false);
+                }}
+              >
+                <Text style={{ color: t.bg, fontFamily: MONO, fontWeight: "600" }}>Go</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -590,6 +668,63 @@ function Chip({ label, active, t, onPress }) {
   );
 }
 
+const CONTEXT_BEFORE = 150;
+const CONTEXT_AFTER  = 200;
+
+function ContextPanel({ words, currentIndex, t, scrollRef, onJump }) {
+  const start = Math.max(0, currentIndex - CONTEXT_BEFORE);
+  const end   = Math.min(words.length - 1, currentIndex + CONTEXT_AFTER);
+  const slice = words.slice(start, end + 1);
+
+  // Auto-scroll so the current word stays visible
+  const itemRefs = useRef({});
+  useEffect(() => {
+    const relIdx = currentIndex - start;
+    const node   = itemRefs.current[relIdx];
+    if (node?.measureLayout && scrollRef?.current) {
+      node.measureLayout(
+        scrollRef.current,
+        (_x, y) => scrollRef.current.scrollTo({ y: Math.max(0, y - 80), animated: true }),
+        () => {}
+      );
+    }
+  }, [currentIndex, start]);
+
+  return (
+    <ScrollView
+      ref={scrollRef}
+      style={[s.ctxPanel, { backgroundColor: t.surface, borderColor: t.muted + "33" }]}
+      contentContainerStyle={s.ctxContent}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={s.ctxWords}>
+        {slice.map((word, i) => {
+          const absIdx  = start + i;
+          const isCur   = absIdx === currentIndex;
+          return (
+            <TouchableOpacity
+              key={absIdx}
+              ref={el => { itemRefs.current[i] = el; }}
+              onPress={() => onJump(absIdx)}
+              activeOpacity={0.6}
+            >
+              <Text
+                style={[
+                  s.ctxWord,
+                  { color: isCur ? t.bg : t.text },
+                  isCur && { backgroundColor: t.accent, borderRadius: 4 },
+                ]}
+              >
+                {word}{" "}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </ScrollView>
+  );
+}
+
 // ── styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
@@ -621,7 +756,8 @@ const s = StyleSheet.create({
     minHeight: 180, position: "relative",
   },
   orp:       { textAlign: "center" },
-  wordCount: { position: "absolute", bottom: 16, right: 20, fontSize: 11, letterSpacing: 2 },
+  wordCount:    { fontSize: 11, letterSpacing: 2 },
+  wordCountBtn: { position: "absolute", bottom: 16, right: 20 },
   annDot: {
     position: "absolute", top: 14, right: 14,
     width: 8, height: 8, borderRadius: 4,
@@ -700,4 +836,13 @@ const s = StyleSheet.create({
     borderWidth: 1, borderRadius: 8,
     paddingHorizontal: 20, paddingVertical: 10,
   },
+
+  // Context panel
+  ctxPanel: {
+    width: "100%", maxWidth: 720, marginTop: 16,
+    maxHeight: 220, borderWidth: 1, borderRadius: 12,
+  },
+  ctxContent: { padding: 14 },
+  ctxWords:   { flexDirection: "row", flexWrap: "wrap" },
+  ctxWord:    { fontSize: 14, lineHeight: 22, paddingHorizontal: 2 },
 });

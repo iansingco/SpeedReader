@@ -123,21 +123,30 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
       if (!ids.length) { setBooks([]); return; }
 
       const booksRes  = await fetch(
-        `${base}/ajax/books?ids=${ids.join(",")}&fields=title,authors,cover&library_id=${encodeURIComponent(libId)}`,
+        `${base}/ajax/books?ids=${ids.join(",")}&fields=title,authors,cover,formats&library_id=${encodeURIComponent(libId)}`,
         { headers: headers(user, pass) }
       );
       if (!booksRes.ok) throw new Error(`Books fetch failed: HTTP ${booksRes.status}`);
       const booksData = await booksRes.json();
 
+      // Prefer EPUB, fall back to MOBI, then first available format
+      const PREF = ["EPUB", "MOBI", "AZW3", "PDF"];
       setBooks(
-        Object.entries(booksData).map(([id, d]) => ({
-          calibreId: id,
-          title:     d.title  || "Unknown",
-          author:    Array.isArray(d.authors) ? d.authors[0] : (d.authors || ""),
-          hasCover:  !!d.cover,
-          coverUrl:  d.cover ? `${base}/get/cover/${id}/${encodeURIComponent(libId)}` : null,
-          epubUrl:   `${base}/get/EPUB/${id}/${encodeURIComponent(libId)}`,
-        }))
+        Object.entries(booksData).map(([id, d]) => {
+          const fmts   = (d.formats || []).map(f => f.toUpperCase());
+          const fmt    = PREF.find(p => fmts.includes(p)) || fmts[0];
+          if (!fmt) return null;
+          return {
+            calibreId: id,
+            title:     d.title  || "Unknown",
+            author:    Array.isArray(d.authors) ? d.authors[0] : (d.authors || ""),
+            hasCover:  !!d.cover,
+            coverUrl:  d.cover ? `${base}/get/cover/${id}/${encodeURIComponent(libId)}` : null,
+            downloadUrl: `${base}/get/${fmt}/${id}/${encodeURIComponent(libId)}`,
+            format:    fmt.toLowerCase(),
+            formats:   fmts,
+          };
+        }).filter(Boolean)
       );
     } catch (e) {
       setError(`Failed to load books: ${e.message}`);
@@ -151,17 +160,18 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
   const importBook = async (book) => {
     setImporting(prev => ({ ...prev, [book.calibreId]: true }));
     try {
-      let epubUri      = book.epubUrl;
-      let coverDataUrl = null;
+      const ext = book.format || "epub";
+      let   bookUri    = book.downloadUrl;
+      let   coverDataUrl = null;
 
       // On native, download to cache first
       if (Platform.OS !== "web") {
-        const dest   = FileSystem.cacheDirectory + `calibre_${book.calibreId}.epub`;
-        const result = await FileSystem.downloadAsync(book.epubUrl, dest, {
+        const dest   = FileSystem.cacheDirectory + `calibre_${book.calibreId}.${ext}`;
+        const result = await FileSystem.downloadAsync(book.downloadUrl, dest, {
           headers: headers(),
         });
         if (result.status !== 200) throw new Error(`Download failed: HTTP ${result.status}`);
-        epubUri = result.uri;
+        bookUri = result.uri;
       }
 
       // Fetch cover as data URL
@@ -187,8 +197,8 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
       }
 
       await onImport({
-        uri:         epubUri,
-        name:        `${book.title}.epub`,
+        uri:         bookUri,
+        name:        `${book.title}.${ext}`,
         title:       book.title,
         author:      book.author,
         coverDataUrl,
@@ -359,6 +369,9 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
                           {book.author}
                         </Text>
                       )}
+                      <Text style={[ms.bookFormats, { color: t.accent, fontFamily: MONO }]}>
+                        {book.formats.join(" · ")}
+                      </Text>
                     </View>
                     <TouchableOpacity
                       style={[ms.importBtn, { borderColor: t.accent }]}
@@ -446,8 +459,9 @@ const ms = StyleSheet.create({
     width: 44, height: 66, borderRadius: 4,
     alignItems: "center", justifyContent: "center",
   },
-  bookTitle:  { fontSize: 14, fontWeight: "600" },
-  bookAuthor: { fontSize: 12, marginTop: 2 },
+  bookTitle:   { fontSize: 14, fontWeight: "600" },
+  bookAuthor:  { fontSize: 12, marginTop: 2 },
+  bookFormats: { fontSize: 10, marginTop: 3, letterSpacing: 1 },
   importBtn: {
     borderWidth: 1, borderRadius: 6,
     paddingHorizontal: 12, paddingVertical: 6,
