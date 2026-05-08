@@ -45,13 +45,14 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
   const [url,        setUrl]        = useState(DEFAULT_URL);
   const [username,   setUsername]   = useState("");
   const [password,   setPassword]   = useState("");
-  const [connecting, setConnecting] = useState(false);
-  const [connected,  setConnected]  = useState(false);
-  const [libraryId,  setLibraryId]  = useState("");
-  const [books,      setBooks]      = useState([]);
-  const [loading,    setLoading]    = useState(false);
-  const [error,      setError]      = useState(null);
-  const [importing,  setImporting]  = useState({});
+  const [connecting,   setConnecting]   = useState(false);
+  const [connected,    setConnected]    = useState(false);
+  const [libraryId,    setLibraryId]    = useState("");
+  const [books,        setBooks]        = useState([]);
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState(null);
+  const [importing,    setImporting]    = useState({});
+  const [searchInput,  setSearchInput]  = useState("");
 
   // Restore saved config and auto-reconnect on open
   useEffect(() => {
@@ -109,12 +110,13 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
 
   // ── fetch book list ───────────────────────────────────────────────────────────
 
-  const fetchBooks = async (libId, base = url.replace(/\/$/, ""), user = username, pass = password) => {
+  const fetchBooks = async (libId, base = url.replace(/\/$/, ""), user = username, pass = password, query = "") => {
     setLoading(true);
     setError(null);
     try {
+      const searchBase = `${base}/ajax/search?num=100&sort=title&library_id=${encodeURIComponent(libId)}`;
       const searchRes  = await fetch(
-        `${base}/ajax/search?num=100&sort=title&library_id=${encodeURIComponent(libId)}`,
+        query ? `${searchBase}&query=${encodeURIComponent(query)}` : searchBase,
         { headers: headers(user, pass) }
       );
       if (!searchRes.ok) throw new Error(`Search failed: HTTP ${searchRes.status}`);
@@ -324,8 +326,29 @@ export default function CalibreModal({ visible, onClose, theme, t, onImport }) {
                   <Text style={[ms.connectedText, { color: t.accent, fontFamily: MONO }]}>
                     ✓ Connected · {libraryId}
                   </Text>
-                  <TouchableOpacity onPress={() => { setConnected(false); setBooks([]); }}>
+                  <TouchableOpacity onPress={() => { setConnected(false); setBooks([]); setSearchInput(""); }}>
                     <Text style={{ color: t.muted, fontSize: 12, fontFamily: MONO }}>Disconnect</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Search bar */}
+                <View style={ms.searchRow}>
+                  <TextInput
+                    style={[ms.searchInput, { color: t.text, borderColor: t.muted + "44", backgroundColor: t.surface }]}
+                    value={searchInput}
+                    onChangeText={setSearchInput}
+                    onSubmitEditing={() => fetchBooks(libraryId, undefined, undefined, undefined, searchInput)}
+                    placeholder="Search Calibre library…"
+                    placeholderTextColor={t.muted}
+                    returnKeyType="search"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    style={[ms.searchBtn, { borderColor: t.muted + "44" }]}
+                    onPress={() => fetchBooks(libraryId, undefined, undefined, undefined, searchInput)}
+                  >
+                    <Text style={{ color: t.muted, fontSize: 16 }}>⌕</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -445,7 +468,19 @@ const ms = StyleSheet.create({
 
   connectedRow: {
     flexDirection: "row", justifyContent: "space-between",
-    alignItems: "center", marginBottom: 16,
+    alignItems: "center", marginBottom: 12,
+  },
+  searchRow: {
+    flexDirection: "row", gap: 8, alignItems: "center", marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1, borderWidth: 1, borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 8, fontSize: 14,
+  },
+  searchBtn: {
+    borderWidth: 1, borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 8,
+    alignItems: "center", justifyContent: "center",
   },
   connectedText: { fontSize: 12, letterSpacing: 1 },
   loadingRow: { flexDirection: "row", alignItems: "center", marginBottom: 12 },

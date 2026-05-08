@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Platform,
   ActivityIndicator,
   Dimensions,
+  TextInput,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import { THEMES, MONO } from "./constants";
@@ -89,6 +90,57 @@ function BookCard({ book, onPress, onLongPress, t }) {
   );
 }
 
+// ── book row (list view) ───────────────────────────────────────────────────────
+
+function BookRow({ book, onPress, onLongPress, t }) {
+  const progress = book.wordCount > 0 ? book.lastPosition / book.wordCount : 0;
+  const pct      = Math.min(100, Math.round(progress * 100));
+
+  return (
+    <TouchableOpacity
+      style={[cs.row, { borderBottomColor: t.muted + "22" }]}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      activeOpacity={0.75}
+    >
+      <View style={cs.rowThumb}>
+        {book.coverDataUrl ? (
+          <Image source={{ uri: book.coverDataUrl }} style={cs.rowThumbImg} resizeMode="cover" />
+        ) : (
+          <View style={[cs.rowThumbPlaceholder, { backgroundColor: t.surface }]}>
+            <Text style={[cs.coverInitial, { color: t.accent, fontSize: 22 }]}>
+              {(book.title || "?").charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        )}
+      </View>
+      <View style={{ flex: 1, gap: 3 }}>
+        <Text style={[cs.cardTitle, { color: t.text }]} numberOfLines={2}>
+          {book.title || book.id}
+        </Text>
+        {!!book.author && (
+          <Text style={[cs.cardAuthor, { color: t.muted }]} numberOfLines={1}>
+            {book.author}
+          </Text>
+        )}
+        <View style={cs.cardMeta}>
+          <Text style={[cs.fmtBadge, { color: t.accent, borderColor: t.accent + "55" }]}>
+            {(book.format || "").toUpperCase()}
+          </Text>
+          {pct > 0 && (
+            <Text style={[cs.pctText, { color: t.muted, fontFamily: MONO }]}>{pct}%</Text>
+          )}
+        </View>
+        {pct > 0 && (
+          <View style={[cs.rowProgressWrap, { backgroundColor: t.muted + "44" }]}>
+            <View style={[cs.progressBar, { width: `${pct}%`, backgroundColor: t.accent }]} />
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
 export default function Library({ theme, onChangeTheme, onOpenBook }) {
@@ -99,6 +151,9 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
   const [showCalibre,  setShowCalibre]  = useState(false);
   const [openingId,    setOpeningId]    = useState(null);
   const [numCols,      setNumCols]      = useState(2);
+  const [searchQuery,  setSearchQuery]  = useState("");
+  const [listView,     setListView]     = useState(false);
+  const [sortBy,       setSortBy]       = useState("recent");
 
   const t = THEMES[theme];
 
@@ -261,6 +316,23 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
     }
   }, [onOpenBook]);
 
+  // ── filter + sort ────────────────────────────────────────────────────────────
+
+  const displayedBooks = useMemo(() => {
+    let list = [...books];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(b =>
+        (b.title  || "").toLowerCase().includes(q) ||
+        (b.author || "").toLowerCase().includes(q)
+      );
+    }
+    if (sortBy === "title")  list.sort((a, b) => (a.title  || "").localeCompare(b.title  || ""));
+    if (sortBy === "author") list.sort((a, b) => (a.author || "").localeCompare(b.author || ""));
+    if (sortBy === "read")   list.sort((a, b) => (b.lastPosition || 0) - (a.lastPosition || 0));
+    return list;
+  }, [books, searchQuery, sortBy]);
+
   // ── render ───────────────────────────────────────────────────────────────────
 
   const isEmpty = books.length === 0;
@@ -309,6 +381,43 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
         </View>
       )}
 
+      {/* Search + view controls (hidden when library is empty) */}
+      {!isEmpty && (
+        <View style={[cs.searchRow, { borderBottomColor: t.muted + "22" }]}>
+          <TextInput
+            style={[cs.searchInput, { color: t.text, borderColor: t.muted + "44", backgroundColor: t.surface }]}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search title or author…"
+            placeholderTextColor={t.muted}
+            clearButtonMode="while-editing"
+          />
+          <TouchableOpacity
+            style={[cs.iconBtn, { borderColor: t.muted + "44" }]}
+            onPress={() => setListView(v => !v)}
+          >
+            <Text style={{ color: listView ? t.accent : t.muted, fontSize: 16, lineHeight: 20 }}>
+              {listView ? "⊟" : "⊞"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {!isEmpty && (
+        <View style={cs.sortRow}>
+          {[["recent", "Recent"], ["read", "Last Read"], ["title", "Title"], ["author", "Author"]].map(([key, label]) => (
+            <TouchableOpacity
+              key={key}
+              style={[cs.sortChip, { borderColor: sortBy === key ? t.accent : t.muted + "44", backgroundColor: sortBy === key ? t.accent + "22" : "transparent" }]}
+              onPress={() => setSortBy(key)}
+            >
+              <Text style={{ color: sortBy === key ? t.accent : t.muted, fontSize: 10, fontFamily: MONO }}>
+                {label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
       {/* Empty state */}
       {isEmpty ? (
         <View style={cs.emptyState}>
@@ -334,29 +443,49 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
           </TouchableOpacity>
         </View>
       ) : (
-        <FlatList
-          key={numCols}
-          data={books}
-          numColumns={numCols}
-          keyExtractor={b => b.id}
-          contentContainerStyle={cs.grid}
-          renderItem={({ item }) => (
-            <View style={{ flex: 1 / numCols, padding: 6 }}>
-              <BookCard
-                book={item}
-                t={t}
-                onPress={() => openBook(item)}
-                onLongPress={() => deleteBook(item.id)}
-              />
-              {/* Opening spinner overlay */}
-              {openingId === item.id && (
-                <View style={cs.openingOverlay}>
-                  <ActivityIndicator color={t.accent} />
-                </View>
-              )}
+        <>
+          {displayedBooks.length === 0 && (
+            <View style={{ padding: 40, alignItems: "center" }}>
+              <Text style={{ color: t.muted, fontSize: 14 }}>No books match your search.</Text>
             </View>
           )}
-        />
+          <FlatList
+            key={(listView ? "L" : "G") + numCols}
+            data={displayedBooks}
+            numColumns={listView ? 1 : numCols}
+            keyExtractor={b => b.id}
+            contentContainerStyle={listView ? cs.listGrid : cs.grid}
+            renderItem={({ item }) => listView ? (
+              <View style={{ position: "relative" }}>
+                <BookRow
+                  book={item}
+                  t={t}
+                  onPress={() => openBook(item)}
+                  onLongPress={() => deleteBook(item.id)}
+                />
+                {openingId === item.id && (
+                  <View style={[cs.openingOverlay, { borderRadius: 0 }]}>
+                    <ActivityIndicator color={t.accent} />
+                  </View>
+                )}
+              </View>
+            ) : (
+              <View style={{ flex: 1 / numCols, padding: 6 }}>
+                <BookCard
+                  book={item}
+                  t={t}
+                  onPress={() => openBook(item)}
+                  onLongPress={() => deleteBook(item.id)}
+                />
+                {openingId === item.id && (
+                  <View style={cs.openingOverlay}>
+                    <ActivityIndicator color={t.accent} />
+                  </View>
+                )}
+              </View>
+            )}
+          />
+        </>
       )}
 
       <CalibreModal
@@ -409,7 +538,34 @@ const cs = StyleSheet.create({
     borderRadius: 10, borderWidth: 1,
   },
 
-  grid: { padding: 10 },
+  grid:     { padding: 10 },
+  listGrid: { paddingHorizontal: 12, paddingVertical: 6 },
+
+  searchRow: {
+    flexDirection: "row", gap: 8, alignItems: "center",
+    paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1,
+  },
+  searchInput: {
+    flex: 1, borderWidth: 1, borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 7, fontSize: 14,
+  },
+  sortRow: {
+    flexDirection: "row", gap: 6, flexWrap: "wrap",
+    paddingHorizontal: 12, paddingVertical: 8,
+  },
+  sortChip: {
+    paddingHorizontal: 10, paddingVertical: 3,
+    borderRadius: 6, borderWidth: 1,
+  },
+
+  row: {
+    flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  rowThumb:            { width: 52, height: 78, borderRadius: 6, overflow: "hidden" },
+  rowThumbImg:         { width: "100%", height: "100%" },
+  rowThumbPlaceholder: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
+  rowProgressWrap:     { height: 3, borderRadius: 99, marginTop: 4 },
 
   card: {
     borderRadius: 10, overflow: "hidden",

@@ -138,10 +138,14 @@ async function parseEPUB(uri) {
     }
   }
 
-  // Spine
-  const manifest = Object.fromEntries(
-    [...opf.matchAll(/<item\s[^>]*\bid="([^"]+)"[^>]*\bhref="([^"]+)"/gi)].map(m => [m[1], m[2]])
-  );
+  // Spine — extract id/href independently so attribute order doesn't matter
+  const manifest = {};
+  for (const m of opf.matchAll(/<item\s([^>]+?)\/?\s*>/gi)) {
+    const attrs = m[1];
+    const id   = attrs.match(/\bid="([^"]+)"/)?.[1];
+    const href = attrs.match(/\bhref="([^"]+)"/)?.[1];
+    if (id && href) manifest[id] = href;
+  }
   const spine = [...opf.matchAll(/<itemref\s[^>]*\bidref="([^"]+)"/gi)]
     .map(m => manifest[m[1]])
     .filter(Boolean);
