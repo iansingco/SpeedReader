@@ -43,6 +43,28 @@ function WpmSlider({ value, onValueChange, minimumTrackTintColor, maximumTrackTi
   );
 }
 
+function PauseSlider({ value, onChange, min, max, step, t }) {
+  if (Platform.OS === "web") {
+    return (
+      <input
+        type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(Math.round(Number(e.target.value) * 10) / 10)}
+        style={{ flex: 1, maxWidth: 180, accentColor: t.accent }}
+      />
+    );
+  }
+  return (
+    <Slider
+      style={{ flex: 1, maxWidth: 180 }}
+      minimumValue={min} maximumValue={max} step={step}
+      value={value} onValueChange={v => onChange(Math.round(v * 10) / 10)}
+      minimumTrackTintColor={t.accent}
+      maximumTrackTintColor={t.muted + "66"}
+      thumbTintColor={t.accent}
+    />
+  );
+}
+
 // ── sample text ───────────────────────────────────────────────────────────────
 
 const SAMPLE = `The art of reading swiftly is not merely about speed — it is about presence. When each word arrives alone, stripped of the noise of the page, the mind locks in. There is nowhere else to look. The sentence assembles itself inside you, word by word, like a slow tide becoming a wave. Speed reading does not reduce comprehension; it sharpens it. The eye, freed from wandering, delivers each token cleanly to the mind. Rhythm emerges. Meaning deepens. The reader becomes the reading.`;
@@ -59,12 +81,22 @@ const SAMPLE = `The art of reading swiftly is not merely about speed — it is a
  */
 // Multiplier applied to base word delay based on trailing punctuation.
 // Strips trailing quotes/brackets before testing so "word." still matches.
-function getPauseMult(word, strength = 1) {
-  if (strength <= 0) return 1;
-  const w = word.replace(/["""'''\])}]+$/, "").trim();
-  if (/[.!?…]$/.test(w)) return 1 + 1.5 * strength;
-  if (/[;:]$/.test(w))   return 1 + 0.8 * strength;
-  if (/[,—–\-]$/.test(w)) return 1 + 0.4 * strength;
+function getPauseMult(word, strength = 1, custom = null) {
+  const w       = word.replace(/["""'''\])}]+$/, "").trim();
+  const isStop  = /[.!?…]$/.test(w);
+  const isSemi  = /[;:]$/.test(w);
+  const isComma = /[,—–\-]$/.test(w);
+
+  if (strength === "custom" && custom) {
+    if (isStop)  return custom.sentence;
+    if (isSemi)  return custom.semi;
+    if (isComma) return custom.comma;
+    return 1;
+  }
+  if (!strength || strength <= 0) return 1;
+  if (isStop)  return 1 + 1.5 * strength;
+  if (isSemi)  return 1 + 0.8 * strength;
+  if (isComma) return 1 + 0.4 * strength;
   return 1;
 }
 
@@ -86,6 +118,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   const [wordColor,     setWordColor]     = useState(null);
   const [skipAmount,    setSkipAmount]    = useState(20);
   const [pauseStrength, setPauseStrength] = useState(1);
+  const [customPause,   setCustomPause]   = useState({ sentence: 2.5, semi: 1.8, comma: 1.4 });
 
   // ── annotation state ─────────────────────────────────────────────────────────
   const [annotations,       setAnnotations]       = useState(book?.annotations || {});
@@ -101,6 +134,8 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   const contextScrollRef  = useRef(null);
   const pauseStrengthRef  = useRef(pauseStrength);
   useEffect(() => { pauseStrengthRef.current = pauseStrength; }, [pauseStrength]);
+  const customPauseRef    = useRef(customPause);
+  useEffect(() => { customPauseRef.current = customPause; }, [customPause]);
 
   // bookId drives storage persistence
   const bookId = book?.id || makeBookId(fileName);
@@ -167,7 +202,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
     const tick = (fromIndex) => {
       if (cancelled) return;
       const word = words[fromIndex] || "";
-      const mult = getPauseMult(word, pauseStrengthRef.current);
+      const mult = getPauseMult(word, pauseStrengthRef.current, customPauseRef.current);
 
       intervalRef.current = setTimeout(() => {
         if (cancelled) return;
@@ -533,7 +568,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
               ))}
             </SettingRow>
             <SettingRow label="PUNCT PAUSE" t={t}>
-              {[["Off", 0], ["Light", 0.5], ["Normal", 1], ["Heavy", 2]].map(([label, val]) => (
+              {[["Off", 0], ["Light", 0.5], ["Normal", 1], ["Heavy", 2], ["Custom", "custom"]].map(([label, val]) => (
                 <Chip
                   key={label}
                   label={label}
@@ -543,6 +578,34 @@ export default function SpeedReader({ book, onBack, onProgress }) {
                 />
               ))}
             </SettingRow>
+
+            {/* Custom pause sub-panel */}
+            {pauseStrength === "custom" && (
+              <View style={[s.customPausePanel, { backgroundColor: t.bg, borderColor: t.muted + "33" }]}>
+                {[
+                  ["FULL STOP  . ! ?", "sentence", 1, 5],
+                  ["SEMICOLON  ; :",   "semi",     1, 3],
+                  ["COMMA  , —",       "comma",    1, 2.5],
+                ].map(([label, key, min, max]) => (
+                  <View key={key} style={s.customPauseRow}>
+                    <Text style={[s.customPauseLabel, { color: t.muted, fontFamily: MONO }]}>
+                      {label}
+                    </Text>
+                    <View style={s.customPauseControl}>
+                      <PauseSlider
+                        value={customPause[key]}
+                        onChange={v => setCustomPause(prev => ({ ...prev, [key]: v }))}
+                        min={min} max={max} step={0.1}
+                        t={t}
+                      />
+                      <Text style={[s.customPauseValue, { color: t.accent, fontFamily: MONO }]}>
+                        {customPause[key].toFixed(1)}×
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         )}
       </ScrollView>
@@ -858,6 +921,15 @@ const s = StyleSheet.create({
   settingControl:{ flexDirection: "row", gap: 8, flexWrap: "wrap", alignItems: "center" },
   chipBtn:       { paddingHorizontal: 14, paddingVertical: 4, borderRadius: 6, borderWidth: 1 },
   colorDot:      { width: 24, height: 24, borderRadius: 12, borderWidth: 2.5 },
+
+  customPausePanel: {
+    borderWidth: 1, borderRadius: 10,
+    padding: 14, gap: 14, marginTop: 4,
+  },
+  customPauseRow:     { gap: 4 },
+  customPauseLabel:   { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase" },
+  customPauseControl: { flexDirection: "row", alignItems: "center", gap: 10 },
+  customPauseValue:   { fontSize: 13, minWidth: 38, textAlign: "right" },
 
   // Annotation modal
   modalOverlay: {
