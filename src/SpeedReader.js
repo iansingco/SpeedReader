@@ -59,11 +59,12 @@ const SAMPLE = `The art of reading swiftly is not merely about speed — it is a
  */
 // Multiplier applied to base word delay based on trailing punctuation.
 // Strips trailing quotes/brackets before testing so "word." still matches.
-function getPauseMult(word) {
+function getPauseMult(word, strength = 1) {
+  if (strength <= 0) return 1;
   const w = word.replace(/["""'''\])}]+$/, "").trim();
-  if (/[.!?…]$/.test(w)) return 2.5;
-  if (/[;:]$/.test(w))   return 1.8;
-  if (/[,—–\-]$/.test(w)) return 1.4;
+  if (/[.!?…]$/.test(w)) return 1 + 1.5 * strength;
+  if (/[;:]$/.test(w))   return 1 + 0.8 * strength;
+  if (/[,—–\-]$/.test(w)) return 1 + 0.4 * strength;
   return 1;
 }
 
@@ -82,8 +83,9 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   const [finished,    setFinished]    = useState(false);
   const [loading,     setLoading]     = useState(false);
   const [parseError,  setParseError]  = useState(null);
-  const [wordColor,   setWordColor]   = useState(null);
-  const [skipAmount,  setSkipAmount]  = useState(20);
+  const [wordColor,     setWordColor]     = useState(null);
+  const [skipAmount,    setSkipAmount]    = useState(20);
+  const [pauseStrength, setPauseStrength] = useState(1);
 
   // ── annotation state ─────────────────────────────────────────────────────────
   const [annotations,       setAnnotations]       = useState(book?.annotations || {});
@@ -96,7 +98,9 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   const [showContext,     setShowContext]     = useState(false);
   const [showJumpModal,   setShowJumpModal]   = useState(false);
   const [jumpInput,       setJumpInput]       = useState("");
-  const contextScrollRef = useRef(null);
+  const contextScrollRef  = useRef(null);
+  const pauseStrengthRef  = useRef(pauseStrength);
+  useEffect(() => { pauseStrengthRef.current = pauseStrength; }, [pauseStrength]);
 
   // bookId drives storage persistence
   const bookId = book?.id || makeBookId(fileName);
@@ -163,7 +167,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
     const tick = (fromIndex) => {
       if (cancelled) return;
       const word = words[fromIndex] || "";
-      const mult = getPauseMult(word);
+      const mult = getPauseMult(word, pauseStrengthRef.current);
 
       intervalRef.current = setTimeout(() => {
         if (cancelled) return;
@@ -525,6 +529,17 @@ export default function SpeedReader({ book, onBack, onProgress }) {
                   active={skipAmount === n}
                   t={t}
                   onPress={() => setSkipAmount(n)}
+                />
+              ))}
+            </SettingRow>
+            <SettingRow label="PUNCT PAUSE" t={t}>
+              {[["Off", 0], ["Light", 0.5], ["Normal", 1], ["Heavy", 2]].map(([label, val]) => (
+                <Chip
+                  key={label}
+                  label={label}
+                  active={pauseStrength === val}
+                  t={t}
+                  onPress={() => setPauseStrength(val)}
                 />
               ))}
             </SettingRow>
