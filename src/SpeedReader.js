@@ -57,6 +57,16 @@ const SAMPLE = `The art of reading swiftly is not merely about speed — it is a
  *   onBack      () => void   — shows a back-to-library button
  *   onProgress  (wordIndex) => void  — called on back / finish
  */
+// Multiplier applied to base word delay based on trailing punctuation.
+// Strips trailing quotes/brackets before testing so "word." still matches.
+function getPauseMult(word) {
+  const w = word.replace(/["""'''\])}]+$/, "").trim();
+  if (/[.!?…]$/.test(w)) return 2.5;
+  if (/[;:]$/.test(w))   return 1.8;
+  if (/[,—–\-]$/.test(w)) return 1.4;
+  return 1;
+}
+
 export default function SpeedReader({ book, onBack, onProgress }) {
   // ── reader state ─────────────────────────────────────────────────────────────
   const [words,       setWords]       = useState(() => book?.words?.length ? book.words : tokenize(SAMPLE));
@@ -92,6 +102,8 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   const bookId = book?.id || makeBookId(fileName);
 
   const intervalRef    = useRef(null);
+  const indexRef       = useRef(index);
+  useEffect(() => { indexRef.current = index; }, [index]);
   const annotationsRef = useRef(annotations);
   useEffect(() => { annotationsRef.current = annotations; }, [annotations]);
 
@@ -131,7 +143,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   // ── playback ──────────────────────────────────────────────────────────────────
 
   const stop = useCallback(() => {
-    clearInterval(intervalRef.current);
+    clearTimeout(intervalRef.current);
     setPlaying(false);
   }, []);
 
@@ -144,29 +156,48 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   }, [index, words.length, chunkSize]);
 
   useEffect(() => {
-    if (!playing) { clearInterval(intervalRef.current); return; }
-    intervalRef.current = setInterval(() => {
-      setIndex(prev => {
-        const next = prev + chunkSize;
+    if (!playing) { clearTimeout(intervalRef.current); return; }
+
+    let cancelled = false;
+
+    const tick = (fromIndex) => {
+      if (cancelled) return;
+      const word = words[fromIndex] || "";
+      const mult = getPauseMult(word);
+
+      intervalRef.current = setTimeout(() => {
+        if (cancelled) return;
+        const next = fromIndex + chunkSize;
+
         if (next >= words.length) {
-          clearInterval(intervalRef.current);
           setPlaying(false);
           setFinished(true);
+          setIndex(words.length - 1);
+          setProgress(100);
           if (onProgress) onProgress(words.length - 1);
           if (book?.id) storage.updatePosition(book.id, words.length - 1);
-          return words.length - 1;
+          return;
         }
+
+        setIndex(next);
         setProgress(Math.round((next / words.length) * 100));
-        // Pause on annotated word
+
         if (annotationsRef.current[next]) {
-          clearInterval(intervalRef.current);
           setPlaying(false);
           setShowAnnotation(annotationsRef.current[next]);
+          return;
         }
-        return next;
-      });
-    }, delay);
-    return () => clearInterval(intervalRef.current);
+
+        tick(next);
+      }, Math.round(delay * mult));
+    };
+
+    tick(indexRef.current);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(intervalRef.current);
+    };
   }, [playing, delay, words.length, chunkSize]);
 
   // ── back to library ───────────────────────────────────────────────────────────
