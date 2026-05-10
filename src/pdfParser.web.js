@@ -1,6 +1,7 @@
 export async function parsePDF(uri) {
-  const pdfjsLib = await import("pdfjs-dist");
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+  const pdfjsModule = await import("pdfjs-dist");
+  const pdfjsLib = pdfjsModule.default ?? pdfjsModule;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 
   const data = await (await fetch(uri)).arrayBuffer();
   const pdf  = await pdfjsLib.getDocument({ data }).promise;

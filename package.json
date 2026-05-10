@@ -19,7 +19,7 @@
     "expo-file-system": "~55.0.19",
     "expo-status-bar": "~55.0.6",
     "jszip": "^3.10.1",
-    "pdfjs-dist": "^5.5.207",
+    "pdfjs-dist": "3.11.174",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-native": "0.83.6",
