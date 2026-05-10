@@ -12,17 +12,17 @@
     "postinstall": "node scripts/copy-pdf-worker.js"
   },
   "dependencies": {
-    "@react-native-async-storage/async-storage": "^3.0.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/slider": "5.1.2",
-    "expo": "~55.0.0",
-    "expo-document-picker": "~55.0.9",
-    "expo-file-system": "~55.0.11",
-    "expo-status-bar": "~55.0.4",
+    "expo": "~55.0.23",
+    "expo-document-picker": "~55.0.13",
+    "expo-file-system": "~55.0.19",
+    "expo-status-bar": "~55.0.6",
     "jszip": "^3.10.1",
     "pdfjs-dist": "^5.5.207",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "react-native": "0.83.2",
+    "react-native": "0.83.6",
     "react-native-web": "~0.21.0"
   },
   "devDependencies": {

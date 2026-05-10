@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system";
+import { parsePDF } from "./pdfParser";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,46 +49,6 @@ function htmlToText(html) {
       .replace(/\s+/g, " ")
       .trim()
   );
-}
-
-// ── PDF ───────────────────────────────────────────────────────────────────────
-
-async function parsePDF(uri) {
-  const pdfjsLib = await import("pdfjs-dist");
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-
-  const data = await (await fetch(uri)).arrayBuffer();
-  const pdf  = await pdfjsLib.getDocument({ data }).promise;
-
-  // Metadata
-  let title = "", author = "";
-  try {
-    const info = (await pdf.getMetadata())?.info;
-    title  = info?.Title  || "";
-    author = info?.Author || "";
-  } catch {}
-
-  // Cover — render page 1 to canvas (web only)
-  let coverDataUrl = null;
-  try {
-    const page     = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: 0.5 });
-    const canvas   = document.createElement("canvas");
-    canvas.width   = viewport.width;
-    canvas.height  = viewport.height;
-    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-    coverDataUrl = canvas.toDataURL("image/jpeg", 0.7);
-  } catch {}
-
-  // Text
-  const pages = [];
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page    = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    pages.push(content.items.map(item => item.str).join(" "));
-  }
-
-  return { text: pages.join("\n"), meta: { title, author, coverDataUrl }, annotations: {} };
 }
 
 // ── EPUB ──────────────────────────────────────────────────────────────────────
