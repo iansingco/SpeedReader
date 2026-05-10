@@ -779,15 +779,19 @@ function Chip({ label, active, t, onPress }) {
 
 const CONTEXT_BEFORE = 150;
 const CONTEXT_AFTER  = 200;
+const SENTENCE_END   = /[.!?…]["'’”]?$/;
 
 function ContextPanel({ words, currentIndex, t, scrollRef, onJump }) {
+  const [pageMode, setPageMode] = useState(false);
+
   const start = Math.max(0, currentIndex - CONTEXT_BEFORE);
   const end   = Math.min(words.length - 1, currentIndex + CONTEXT_AFTER);
   const slice = words.slice(start, end + 1);
 
-  // Auto-scroll so the current word stays visible
+  // ── flow-mode: auto-scroll to current word ────────────────────────────────
   const itemRefs = useRef({});
   useEffect(() => {
+    if (pageMode) return;
     const relIdx = currentIndex - start;
     const node   = itemRefs.current[relIdx];
     if (node?.measureLayout && scrollRef?.current) {
@@ -797,7 +801,43 @@ function ContextPanel({ words, currentIndex, t, scrollRef, onJump }) {
         () => {}
       );
     }
-  }, [currentIndex, start]);
+  }, [currentIndex, start, pageMode]);
+
+  // ── page-mode: group slice into sentences ─────────────────────────────────
+  const sentenceRef = useRef(null);
+  useEffect(() => {
+    if (!pageMode) return;
+    sentenceRef.current?.measureLayout?.(
+      scrollRef.current,
+      (_x, y) => scrollRef.current?.scrollTo({ y: Math.max(0, y - 60), animated: true }),
+      () => {}
+    );
+  }, [currentIndex, pageMode]);
+
+  const sentences = useMemo(() => {
+    const result = [];
+    let cur = [];
+    for (let i = 0; i < slice.length; i++) {
+      const absIdx = start + i;
+      cur.push({ word: slice[i], absIdx });
+      if (SENTENCE_END.test(slice[i]) || i === slice.length - 1) {
+        result.push(cur);
+        cur = [];
+      }
+    }
+    return result;
+  }, [slice, start]);
+
+  const toggle = (
+    <TouchableOpacity
+      onPress={() => setPageMode(v => !v)}
+      style={s.ctxToggle}
+    >
+      <Text style={{ color: t.accent, fontFamily: MONO, fontSize: 10, letterSpacing: 1 }}>
+        {pageMode ? "≡ FLOW" : "¶ PAGE"}
+      </Text>
+    </TouchableOpacity>
+  );
 
   return (
     <ScrollView
@@ -806,30 +846,65 @@ function ContextPanel({ words, currentIndex, t, scrollRef, onJump }) {
       contentContainerStyle={s.ctxContent}
       showsVerticalScrollIndicator={false}
     >
-      <View style={s.ctxWords}>
-        {slice.map((word, i) => {
-          const absIdx  = start + i;
-          const isCur   = absIdx === currentIndex;
+      {toggle}
+
+      {pageMode ? (
+        // ── page view: sentence-blocked layout ──────────────────────────────
+        sentences.map((sentence, si) => {
+          const hasCurrent = sentence.some(w => w.absIdx === currentIndex);
           return (
-            <TouchableOpacity
-              key={absIdx}
-              ref={el => { itemRefs.current[i] = el; }}
-              onPress={() => onJump(absIdx)}
-              activeOpacity={0.6}
+            <View
+              key={sentence[0].absIdx}
+              ref={hasCurrent ? sentenceRef : null}
+              style={s.ctxSentence}
             >
-              <Text
-                style={[
-                  s.ctxWord,
-                  { color: isCur ? t.bg : t.text },
-                  isCur && { backgroundColor: t.accent, borderRadius: 4 },
-                ]}
-              >
-                {word}{" "}
+              <Text style={[s.ctxPageText, { lineHeight: 22 }]}>
+                {sentence.map(({ word, absIdx }) => {
+                  const isCur = absIdx === currentIndex;
+                  return (
+                    <Text
+                      key={absIdx}
+                      onPress={() => onJump(absIdx)}
+                      style={[
+                        { color: isCur ? t.bg : t.text },
+                        isCur && { backgroundColor: t.accent, borderRadius: 3 },
+                      ]}
+                    >
+                      {word}{" "}
+                    </Text>
+                  );
+                })}
               </Text>
-            </TouchableOpacity>
+            </View>
           );
-        })}
-      </View>
+        })
+      ) : (
+        // ── flow view: word-by-word wrapping ────────────────────────────────
+        <View style={s.ctxWords}>
+          {slice.map((word, i) => {
+            const absIdx = start + i;
+            const isCur  = absIdx === currentIndex;
+            return (
+              <TouchableOpacity
+                key={absIdx}
+                ref={el => { itemRefs.current[i] = el; }}
+                onPress={() => onJump(absIdx)}
+                activeOpacity={0.6}
+              >
+                <Text
+                  style={[
+                    s.ctxWord,
+                    { color: isCur ? t.bg : t.text },
+                    isCur && { backgroundColor: t.accent, borderRadius: 4 },
+                  ]}
+                >
+                  {word}{" "}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -960,7 +1035,10 @@ const s = StyleSheet.create({
     width: "100%", maxWidth: 720, marginTop: 16,
     maxHeight: 220, borderWidth: 1, borderRadius: 12,
   },
-  ctxContent: { padding: 14 },
-  ctxWords:   { flexDirection: "row", flexWrap: "wrap" },
-  ctxWord:    { fontSize: 14, lineHeight: 22, paddingHorizontal: 2 },
+  ctxContent:  { padding: 14 },
+  ctxToggle:   { alignSelf: "flex-end", marginBottom: 6 },
+  ctxWords:    { flexDirection: "row", flexWrap: "wrap" },
+  ctxWord:     { fontSize: 14, lineHeight: 22, paddingHorizontal: 2 },
+  ctxSentence: { marginBottom: 10 },
+  ctxPageText: { fontSize: 14 },
 });

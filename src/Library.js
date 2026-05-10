@@ -204,6 +204,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
       try {
         const { text, meta, annotations } = await parseFile(asset);
         const words  = tokenize(text);
+        if (!words.length) throw new Error("No readable text found. The file may be DRM-protected or in an unsupported format.");
         const bookId = makeBookId(asset.name);
         const ext    = asset.name.split(".").pop().toLowerCase();
 
@@ -277,17 +278,20 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
         if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
         parseUri = URL.createObjectURL(await res.blob());
       }
-      const asset  = { uri: parseUri, name: name || `${title}.epub` };
+      const assetName = name || `${title}.epub`;
+      const asset  = { uri: parseUri, name: assetName };
       const { text, meta, annotations } = await parseFile(asset);
       if (Platform.OS === "web" && parseUri !== uri) URL.revokeObjectURL(parseUri);
       const words  = tokenize(text);
+      if (!words.length) throw new Error("No readable text found. The file may be DRM-protected or in an unsupported format.");
       const bookId = calibreId ? `calibre_${calibreId}` : makeBookId(name);
+      const ext    = assetName.split(".").pop().toLowerCase();
 
       const bookMeta = {
         id:           bookId,
-        title:        title  || meta.title  || name.replace(/\.[^.]+$/, ""),
+        title:        title  || meta.title  || assetName.replace(/\.[^.]+$/, ""),
         author:       author || meta.author || "",
-        format:       "epub",
+        format:       ext,
         coverDataUrl: coverDataUrl || meta.coverDataUrl || null,
         wordCount:    words.length,
         lastPosition: 0,
