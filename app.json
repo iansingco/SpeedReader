@@ -11,6 +11,7 @@
     },
     "android": {
       "package": "com.swiftread.app",
+      "permissions": ["READ_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE"],
       "adaptiveIcon": {
         "backgroundColor": "#0a0a0f"
       }

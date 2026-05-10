@@ -82,6 +82,21 @@ export async function deleteAnnotation(bookId, wordIndex) {
   return anns;
 }
 
+// ── local folder paths ────────────────────────────────────────────────────────
+
+const FOLDERS_KEY = "sr_local_folders_v1";
+
+export async function getLocalFolders() {
+  try {
+    const json = await AsyncStorage.getItem(FOLDERS_KEY);
+    return json ? JSON.parse(json) : [];
+  } catch { return []; }
+}
+
+export async function saveLocalFolders(folders) {
+  await AsyncStorage.setItem(FOLDERS_KEY, JSON.stringify(folders));
+}
+
 // ── calibre config ────────────────────────────────────────────────────────────
 
 export async function getCalibreConfig() {

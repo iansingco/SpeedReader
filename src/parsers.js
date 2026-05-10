@@ -22,7 +22,7 @@ async function loadBuffer(uri) {
   if (Platform.OS === "web") {
     return (await fetch(uri)).arrayBuffer();
   }
-  const b64  = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+  const b64  = await FileSystem.readAsStringAsync(uri, { encoding: "base64" });
   const bin  = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
