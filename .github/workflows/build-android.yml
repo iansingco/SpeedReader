@@ -32,4 +32,5 @@ jobs:
         run: |
           url=$(eas build:list --platform android --limit 1 --json --non-interactive | node -e "const d=require('fs').readFileSync('/dev/stdin','utf8');console.log(JSON.parse(d)[0].artifacts.buildUrl)")
           curl -L "$url" -o swiftread.apk
-          gh release upload ${{ github.ref_name }} swiftread.apk
+          gh release create ${{ github.ref_name }} --title "SwiftRead ${{ github.ref_name }}" --notes "Android APK" --verify-tag 2>/dev/null || true
+          gh release upload ${{ github.ref_name }} swiftread.apk --clobber
