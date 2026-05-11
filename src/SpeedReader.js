@@ -1041,22 +1041,36 @@ function ProgressSection({ progress, index, words, wpm, chapters, t, onJump }) {
   );
 }
 
-const CONTEXT_BEFORE = 400;
-const CONTEXT_AFTER  = 600;
+const PAGE_SIZE     = 250;
+const DEFAULT_BEFORE = 80;
+const DEFAULT_AFTER  = 220;
 const SENTENCE_END   = /[.!?…]["''"]?$/;
 
 function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
-  const [pageMode, setPageMode] = useState(true);
+  const [pageMode,    setPageMode]    = useState(true);
+  const [windowStart, setWindowStart] = useState(null); // null = auto-follow
 
-  const start = Math.max(0, currentIndex - CONTEXT_BEFORE);
-  const end   = Math.min(words.length - 1, currentIndex + CONTEXT_AFTER);
-  const slice = words.slice(start, end + 1);
+  const isManual = windowStart !== null;
+
+  // In auto mode, keep current word near the top of the window
+  const effectiveStart = isManual
+    ? windowStart
+    : Math.max(0, currentIndex - DEFAULT_BEFORE);
+  const effectiveEnd = Math.min(words.length - 1, effectiveStart + DEFAULT_BEFORE + DEFAULT_AFTER);
+  const slice = words.slice(effectiveStart, effectiveEnd + 1);
+
+  const canPrev = effectiveStart > 0;
+  const canNext = effectiveEnd < words.length - 1;
+
+  const goPrev = () => setWindowStart(Math.max(0, effectiveStart - PAGE_SIZE));
+  const goNext = () => setWindowStart(Math.min(Math.max(0, words.length - 1 - PAGE_SIZE), effectiveStart + PAGE_SIZE));
+  const goNow  = () => { setWindowStart(null); scrollRef?.current?.scrollTo({ y: 0, animated: true }); };
 
   // ── flow-mode: auto-scroll to current word ────────────────────────────────
   const itemRefs = useRef({});
   useEffect(() => {
-    if (pageMode) return;
-    const relIdx = currentIndex - start;
+    if (pageMode || isManual) return;
+    const relIdx = currentIndex - effectiveStart;
     const node   = itemRefs.current[relIdx];
     if (node?.measureLayout && scrollRef?.current) {
       node.measureLayout(
@@ -1065,24 +1079,24 @@ function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
         () => {}
       );
     }
-  }, [currentIndex, start, pageMode]);
+  }, [currentIndex, effectiveStart, pageMode, isManual]);
 
-  // ── page-mode: group slice into sentences ─────────────────────────────────
+  // ── page-mode: scroll to current sentence ────────────────────────────────
   const sentenceRef = useRef(null);
   useEffect(() => {
-    if (!pageMode) return;
+    if (!pageMode || isManual) return;
     sentenceRef.current?.measureLayout?.(
       scrollRef.current,
       (_x, y) => scrollRef.current?.scrollTo({ y: Math.max(0, y - 60), animated: true }),
       () => {}
     );
-  }, [currentIndex, pageMode]);
+  }, [currentIndex, pageMode, isManual]);
 
   const sentences = useMemo(() => {
     const result = [];
     let cur = [];
     for (let i = 0; i < slice.length; i++) {
-      const absIdx = start + i;
+      const absIdx = effectiveStart + i;
       cur.push({ word: slice[i], absIdx });
       if (SENTENCE_END.test(slice[i]) || i === slice.length - 1) {
         result.push(cur);
@@ -1090,30 +1104,28 @@ function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
       }
     }
     return result;
-  }, [slice, start]);
+  }, [slice, effectiveStart]);
 
-  // Chapter navigation
+  // Chapter info for current position
   const currentChapter = useMemo(() => {
     if (!chapters?.length) return null;
     let ch = chapters[0];
-    for (const c of chapters) {
-      if (c.wordIndex <= currentIndex) ch = c;
-      else break;
-    }
+    for (const c of chapters) { if (c.wordIndex <= currentIndex) ch = c; else break; }
     return ch;
   }, [chapters, currentIndex]);
-
   const prevChapter = useMemo(() => {
     if (!chapters?.length) return null;
     const idx = chapters.indexOf(currentChapter);
     return idx > 0 ? chapters[idx - 1] : null;
   }, [chapters, currentChapter]);
-
   const nextChapter = useMemo(() => {
     if (!chapters?.length) return null;
     const idx = chapters.indexOf(currentChapter);
     return idx >= 0 && idx < chapters.length - 1 ? chapters[idx + 1] : null;
   }, [chapters, currentChapter]);
+
+  // Determine if current word is visible in this window
+  const currentVisible = currentIndex >= effectiveStart && currentIndex <= effectiveEnd;
 
   const header = (
     <View style={s.ctxHeader}>
@@ -1122,21 +1134,32 @@ function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
           {currentChapter.title}
         </Text>
       )}
-      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+      <View style={{ flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {prevChapter && (
           <TouchableOpacity onPress={() => onJump(prevChapter.wordIndex)}>
-            <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10 }}>‹ prev ch</Text>
+            <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10 }}>‹ ch</Text>
           </TouchableOpacity>
         )}
         {nextChapter && (
           <TouchableOpacity onPress={() => onJump(nextChapter.wordIndex)}>
-            <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10 }}>next ch ›</Text>
+            <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10 }}>ch ›</Text>
           </TouchableOpacity>
         )}
-        <TouchableOpacity
-          onPress={() => setPageMode(v => !v)}
-          style={s.ctxToggle}
-        >
+        {/* Page navigation */}
+        <TouchableOpacity onPress={goPrev} disabled={!canPrev} style={{ opacity: canPrev ? 1 : 0.3 }}>
+          <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 12 }}>◀</Text>
+        </TouchableOpacity>
+        {isManual && (
+          <TouchableOpacity onPress={goNow}>
+            <Text style={{ color: t.accent, fontFamily: MONO, fontSize: 10 }}>
+              {currentVisible ? "● now" : "→ now"}
+            </Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity onPress={goNext} disabled={!canNext} style={{ opacity: canNext ? 1 : 0.3 }}>
+          <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 12 }}>▶</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setPageMode(v => !v)} style={s.ctxToggle}>
           <Text style={{ color: t.accent, fontFamily: MONO, fontSize: 10, letterSpacing: 1 }}>
             {pageMode ? "≡ FLOW" : "¶ PAGE"}
           </Text>
@@ -1155,8 +1178,7 @@ function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
       {header}
 
       {pageMode ? (
-        // ── page view: sentence-blocked layout ──────────────────────────────
-        sentences.map((sentence, si) => {
+        sentences.map((sentence) => {
           const hasCurrent = sentence.some(w => w.absIdx === currentIndex);
           return (
             <View
@@ -1185,10 +1207,9 @@ function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
           );
         })
       ) : (
-        // ── flow view: word-by-word wrapping ────────────────────────────────
         <View style={s.ctxWords}>
           {slice.map((word, i) => {
-            const absIdx = start + i;
+            const absIdx = effectiveStart + i;
             const isCur  = absIdx === currentIndex;
             return (
               <TouchableOpacity
@@ -1197,13 +1218,7 @@ function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
                 onPress={() => onJump(absIdx)}
                 activeOpacity={0.6}
               >
-                <Text
-                  style={[
-                    s.ctxWord,
-                    { color: isCur ? t.bg : t.text },
-                    isCur && { backgroundColor: t.accent, borderRadius: 4 },
-                  ]}
-                >
+                <Text style={[s.ctxWord, { color: isCur ? t.bg : t.text }, isCur && { backgroundColor: t.accent, borderRadius: 4 }]}>
                   {word}{" "}
                 </Text>
               </TouchableOpacity>
