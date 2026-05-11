@@ -12,6 +12,7 @@ import {
   Modal,
   TextInput,
   Alert,
+  useWindowDimensions,
 } from "react-native";
 import Slider from "@react-native-community/slider";
 import * as DocumentPicker from "expo-document-picker";
@@ -125,8 +126,13 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   const [chapters,      setChapters]      = useState(book?.chapters || []);
   const [customAccent,  setCustomAccent]  = useState(null);
   const [customBg,      setCustomBg]      = useState(null);
+  const [highlightMode, setHighlightMode] = useState("orp");
+  const [jumpHistory,   setJumpHistory]   = useState([]);
 
   const [scrollEnabled, setScrollEnabled] = useState(true);
+
+  const { width: screenW, height: screenH } = useWindowDimensions();
+  const isLandscape = screenW > screenH;
 
   // ── annotation state ─────────────────────────────────────────────────────────
   const [annotations,       setAnnotations]       = useState(book?.annotations || {});
@@ -153,9 +159,10 @@ export default function SpeedReader({ book, onBack, onProgress }) {
       if (prefs.chunkSize)    setChunkSize(prefs.chunkSize);
       if (prefs.skipAmount !== undefined) setSkipAmount(prefs.skipAmount);
       if (prefs.pauseStrength !== undefined) setPauseStrength(prefs.pauseStrength);
-      if (prefs.customAccent) setCustomAccent(prefs.customAccent);
-      if (prefs.customBg)     setCustomBg(prefs.customBg);
+      if (prefs.customAccent)  setCustomAccent(prefs.customAccent);
+      if (prefs.customBg)      setCustomBg(prefs.customBg);
       if (prefs.wordColor !== undefined) setWordColor(prefs.wordColor);
+      if (prefs.highlightMode) setHighlightMode(prefs.highlightMode);
     });
   }, []);
 
@@ -284,6 +291,13 @@ export default function SpeedReader({ book, onBack, onProgress }) {
     };
   }, [playing, delay, words.length, chunkSize]);
 
+  const jumpTo = useCallback((newIdx) => {
+    setJumpHistory(prev => [...prev.slice(-4), indexRef.current]);
+    stop();
+    setIndex(newIdx);
+    setShowAnnotation(null);
+  }, [stop]);
+
   // ── back to library ───────────────────────────────────────────────────────────
 
   const handleBack = () => {
@@ -379,8 +393,17 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   // ── display ───────────────────────────────────────────────────────────────────
 
   const displayText = words.slice(index, index + chunkSize).join(" ");
-  const { bold, post } = highlightWord(displayText);
-  const hasAnnotation  = !!annotations[index];
+  const { hlPre, hlBold, hlPost } = (() => {
+    if (highlightMode === "off") return { hlPre: "", hlBold: displayText, hlPost: "" };
+    if (highlightMode === "center") {
+      if (displayText.length <= 1) return { hlPre: "", hlBold: displayText, hlPost: "" };
+      const mid = Math.floor(displayText.length / 2);
+      return { hlPre: displayText.slice(0, mid), hlBold: displayText[mid], hlPost: displayText.slice(mid + 1) };
+    }
+    const { bold: b, post: p } = highlightWord(displayText);
+    return { hlPre: "", hlBold: b, hlPost: p };
+  })();
+  const hasAnnotation = !!annotations[index];
 
   // ── render ────────────────────────────────────────────────────────────────────
 
@@ -456,7 +479,14 @@ export default function SpeedReader({ book, onBack, onProgress }) {
         <TouchableOpacity
           activeOpacity={1}
           onPress={() => playing ? stop() : play()}
-          style={[s.stage, { backgroundColor: t.surface }]}
+          style={[
+            s.stage,
+            {
+              backgroundColor: t.surface,
+              height: isLandscape ? Math.round(screenH * 0.52) : 220,
+              marginTop: isLandscape ? 8 : Math.max(32, Math.round(screenH * 0.1)),
+            },
+          ]}
         >
           {finished ? (
             <View style={s.finishBadge}>
@@ -473,8 +503,9 @@ export default function SpeedReader({ book, onBack, onProgress }) {
               numberOfLines={1}
               minimumFontScale={0.4}
             >
-              <Text style={{ color: wordColor ?? t.accent, fontWeight: "700" }}>{bold}</Text>
-              <Text style={{ color: wordColor ?? t.text,   fontWeight: "400" }}>{post}</Text>
+              {hlPre ? <Text style={{ color: wordColor ?? t.text, fontWeight: "400" }}>{hlPre}</Text> : null}
+              <Text style={{ color: highlightMode === "off" ? (wordColor ?? t.text) : (wordColor ?? t.accent), fontWeight: highlightMode === "off" ? "400" : "700" }}>{hlBold}</Text>
+              {hlPost ? <Text style={{ color: wordColor ?? t.text, fontWeight: "400" }}>{hlPost}</Text> : null}
             </Text>
           )}
           {/* Word counter — tap to open jump-to-word */}
@@ -546,7 +577,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
             chapters={chapters}
             t={t}
             scrollRef={contextScrollRef}
-            onJump={(i) => { stop(); setIndex(i); setShowAnnotation(null); }}
+            onJump={jumpTo}
           />
         )}
 
@@ -558,7 +589,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
           wpm={wpm}
           chapters={chapters}
           t={t}
-          onJump={(i) => { stop(); setIndex(i); setShowAnnotation(null); }}
+          onJump={jumpTo}
         />
 
         {/* ── Controls ── */}
@@ -571,6 +602,20 @@ export default function SpeedReader({ book, onBack, onProgress }) {
           <Ctrl label="››" t={t} onPress={() => skipBy(1)} />
         </View>
         <View style={s.secondaryControls}>
+          {jumpHistory.length > 0 && (
+            <Ctrl
+              label="↩"
+              t={t}
+              small
+              onPress={() => {
+                const prev = jumpHistory[jumpHistory.length - 1];
+                setJumpHistory(h => h.slice(0, -1));
+                stop();
+                setIndex(prev);
+                setShowAnnotation(null);
+              }}
+            />
+          )}
           <Ctrl
             label={showContext ? "▲ ctx" : "▼ ctx"}
             t={t}
@@ -608,41 +653,13 @@ export default function SpeedReader({ book, onBack, onProgress }) {
           <View style={[s.settingsPanel, { backgroundColor: t.surface }]}>
             <SettingRow label="FONT SIZE" t={t}>
               {[32, 40, 48, 60, 72, 80, 100, 120].map(sz => (
-                <Chip key={sz} label={String(sz)} active={fontSize === sz} t={t} onPress={() => setFontSize(sz)} />
+                <Chip key={sz} label={String(sz)} active={fontSize === sz} t={t} onPress={() => { setFontSize(sz); savePrefs({ fontSize: sz }); }} />
               ))}
             </SettingRow>
             <SettingRow label="WORDS PER FLASH" t={t}>
               {[1, 2, 3].map(n => (
-                <Chip key={n} label={String(n)} active={chunkSize === n} t={t} onPress={() => setChunkSize(n)} />
+                <Chip key={n} label={String(n)} active={chunkSize === n} t={t} onPress={() => { setChunkSize(n); savePrefs({ chunkSize: n }); }} />
               ))}
-            </SettingRow>
-            <SettingRow label="FONT COLOR" t={t}>
-              {WORD_COLORS.map(({ value, dot }) => (
-                <TouchableOpacity
-                  key={value ?? "default"}
-                  onPress={() => { setWordColor(value); savePrefs({ wordColor: value }); }}
-                  style={[
-                    s.colorDot,
-                    { backgroundColor: dot ?? t.accent, borderColor: wordColor === value ? t.text : "transparent" },
-                  ]}
-                />
-              ))}
-            </SettingRow>
-            <SettingRow label="ACCENT COLOR" t={t}>
-              <RgbColorPicker
-                color={customAccent ?? t.accent}
-                onChange={c => { setCustomAccent(c); savePrefs({ customAccent: c }); }}
-                onReset={() => { setCustomAccent(null); savePrefs({ customAccent: null }); }}
-                t={t}
-              />
-            </SettingRow>
-            <SettingRow label="BACKGROUND COLOR" t={t}>
-              <RgbColorPicker
-                color={customBg ?? THEMES[theme].bg}
-                onChange={c => { setCustomBg(c); savePrefs({ customBg: c }); }}
-                onReset={() => { setCustomBg(null); savePrefs({ customBg: null }); }}
-                t={t}
-              />
             </SettingRow>
             <SettingRow label="SKIP AMOUNT" t={t}>
               {[10, 20, 50, "sentence"].map(n => (
@@ -651,7 +668,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
                   label={n === "sentence" ? "sentence" : `${n}w`}
                   active={skipAmount === n}
                   t={t}
-                  onPress={() => setSkipAmount(n)}
+                  onPress={() => { setSkipAmount(n); savePrefs({ skipAmount: n }); }}
                 />
               ))}
             </SettingRow>
@@ -662,7 +679,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
                   label={label}
                   active={pauseStrength === val}
                   t={t}
-                  onPress={() => setPauseStrength(val)}
+                  onPress={() => { setPauseStrength(val); savePrefs({ pauseStrength: val }); }}
                 />
               ))}
             </SettingRow>
@@ -694,6 +711,47 @@ export default function SpeedReader({ book, onBack, onProgress }) {
                 ))}
               </View>
             )}
+
+            <SettingRow label="HIGHLIGHT MODE" t={t}>
+              {[["ORP", "orp"], ["Center", "center"], ["Off", "off"]].map(([label, val]) => (
+                <Chip key={val} label={label} active={highlightMode === val} t={t}
+                  onPress={() => { setHighlightMode(val); savePrefs({ highlightMode: val }); }} />
+              ))}
+            </SettingRow>
+
+            <SettingRow label="FONT COLOR" t={t}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                {WORD_COLORS.map(({ value, dot }) => (
+                  <TouchableOpacity
+                    key={value ?? "default"}
+                    onPress={() => { setWordColor(value); savePrefs({ wordColor: value }); }}
+                    style={[s.colorDot, { backgroundColor: dot ?? t.accent, borderColor: wordColor === value ? t.text : "transparent" }]}
+                  />
+                ))}
+              </View>
+              <RgbColorPicker
+                color={wordColor ?? THEMES[theme].text}
+                onChange={c => { setWordColor(c); savePrefs({ wordColor: c }); }}
+                onReset={() => { setWordColor(null); savePrefs({ wordColor: null }); }}
+                t={t}
+              />
+            </SettingRow>
+            <SettingRow label="ACCENT COLOR" t={t}>
+              <RgbColorPicker
+                color={customAccent ?? t.accent}
+                onChange={c => { setCustomAccent(c); savePrefs({ customAccent: c }); }}
+                onReset={() => { setCustomAccent(null); savePrefs({ customAccent: null }); }}
+                t={t}
+              />
+            </SettingRow>
+            <SettingRow label="BACKGROUND COLOR" t={t}>
+              <RgbColorPicker
+                color={customBg ?? THEMES[theme].bg}
+                onChange={c => { setCustomBg(c); savePrefs({ customBg: c }); }}
+                onReset={() => { setCustomBg(null); savePrefs({ customBg: null }); }}
+                t={t}
+              />
+            </SettingRow>
           </View>
         )}
       </ScrollView>
@@ -795,11 +853,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
                 style={[s.modalBtn, { backgroundColor: t.accent, borderColor: t.accent }]}
                 onPress={() => {
                   const n = parseInt(jumpInput, 10);
-                  if (!isNaN(n)) {
-                    stop();
-                    setIndex(Math.max(0, Math.min(words.length - 1, n - 1)));
-                    setShowAnnotation(null);
-                  }
+                  if (!isNaN(n)) jumpTo(Math.max(0, Math.min(words.length - 1, n - 1)));
                   setShowJumpModal(false);
                 }}
               >
@@ -987,8 +1041,8 @@ function ProgressSection({ progress, index, words, wpm, chapters, t, onJump }) {
   );
 }
 
-const CONTEXT_BEFORE = 150;
-const CONTEXT_AFTER  = 200;
+const CONTEXT_BEFORE = 400;
+const CONTEXT_AFTER  = 600;
 const SENTENCE_END   = /[.!?…]["''"]?$/;
 
 function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
@@ -1186,10 +1240,10 @@ const s = StyleSheet.create({
   fileName: { fontSize: 11, marginTop: 8, letterSpacing: 2, textTransform: "uppercase" },
 
   stage: {
-    width: "100%", maxWidth: 720, marginTop: 24,
-    borderRadius: 16, paddingVertical: 72, paddingHorizontal: 32,
+    width: "100%", maxWidth: 720,
+    borderRadius: 16, paddingHorizontal: 32,
     alignItems: "center", justifyContent: "center",
-    minHeight: 220, position: "relative",
+    position: "relative",
   },
   orp:       { textAlign: "center" },
   wordCount:    { fontSize: 11, letterSpacing: 2 },
@@ -1298,7 +1352,7 @@ const s = StyleSheet.create({
   // Context panel
   ctxPanel: {
     width: "100%", maxWidth: 720, marginTop: 16,
-    maxHeight: 320, borderWidth: 1, borderRadius: 12,
+    maxHeight: 480, borderWidth: 1, borderRadius: 12,
   },
   ctxContent:  { padding: 14 },
   ctxHeader:   { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 },
