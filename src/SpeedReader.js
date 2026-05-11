@@ -27,7 +27,7 @@ function WpmSlider({ value, onValueChange, minimumTrackTintColor, maximumTrackTi
   if (Platform.OS === "web") {
     return (
       <input
-        type="range" min={50} max={1000} step={10} value={value}
+        type="range" min={50} max={1500} step={10} value={value}
         onChange={e => onValueChange(Number(e.target.value))}
         style={{ flex: 1, maxWidth: 260, accentColor: minimumTrackTintColor, height: 28 }}
       />
@@ -36,7 +36,7 @@ function WpmSlider({ value, onValueChange, minimumTrackTintColor, maximumTrackTi
   return (
     <Slider
       style={style}
-      minimumValue={50} maximumValue={1000} step={10}
+      minimumValue={50} maximumValue={1500} step={10}
       value={value} onValueChange={onValueChange}
       minimumTrackTintColor={minimumTrackTintColor}
       maximumTrackTintColor={maximumTrackTintColor}
@@ -126,7 +126,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   const [chapters,      setChapters]      = useState(book?.chapters || []);
   const [customAccent,  setCustomAccent]  = useState(null);
   const [customBg,      setCustomBg]      = useState(null);
-  const [highlightMode, setHighlightMode] = useState("orp");
+  const [highlightMode, setHighlightMode] = useState("centerl");
   const [jumpHistory,   setJumpHistory]   = useState([]);
 
   const [scrollEnabled, setScrollEnabled] = useState(true);
@@ -162,7 +162,11 @@ export default function SpeedReader({ book, onBack, onProgress }) {
       if (prefs.customAccent)  setCustomAccent(prefs.customAccent);
       if (prefs.customBg)      setCustomBg(prefs.customBg);
       if (prefs.wordColor !== undefined) setWordColor(prefs.wordColor);
-      if (prefs.highlightMode) setHighlightMode(prefs.highlightMode);
+      if (prefs.highlightMode) {
+        const m = prefs.highlightMode;
+        // migrate old key names
+        setHighlightMode(m === "orp" ? "front" : m === "center" ? "centerl" : m);
+      }
     });
   }, []);
 
@@ -394,13 +398,22 @@ export default function SpeedReader({ book, onBack, onProgress }) {
 
   const displayText = words.slice(index, index + chunkSize).join(" ");
   const { hlPre, hlBold, hlPost } = (() => {
-    if (highlightMode === "off") return { hlPre: "", hlBold: displayText, hlPost: "" };
-    if (highlightMode === "center") {
-      if (displayText.length <= 1) return { hlPre: "", hlBold: displayText, hlPost: "" };
-      const mid = Math.floor(displayText.length / 2);
-      return { hlPre: displayText.slice(0, mid), hlBold: displayText[mid], hlPost: displayText.slice(mid + 1) };
+    const text = displayText;
+    const len  = text.length;
+    if (highlightMode === "off") return { hlPre: "", hlBold: text, hlPost: "" };
+    if (highlightMode === "back") {
+      const pivot = Math.round(len * 0.55);
+      return { hlPre: text.slice(0, pivot), hlBold: text.slice(pivot), hlPost: "" };
     }
-    const { bold: b, post: p } = highlightWord(displayText);
+    if (highlightMode === "centerl" || highlightMode === "centerr") {
+      if (len <= 1) return { hlPre: "", hlBold: text, hlPost: "" };
+      const mid = highlightMode === "centerl"
+        ? Math.max(0, Math.ceil(len / 2) - 1)
+        : Math.floor(len / 2);
+      return { hlPre: text.slice(0, mid), hlBold: text[mid], hlPost: text.slice(mid + 1) };
+    }
+    // front (ORP)
+    const { bold: b, post: p } = highlightWord(text);
     return { hlPre: "", hlBold: b, hlPost: p };
   })();
   const hasAnnotation = !!annotations[index];
@@ -483,8 +496,10 @@ export default function SpeedReader({ book, onBack, onProgress }) {
             s.stage,
             {
               backgroundColor: t.surface,
-              height: isLandscape ? Math.round(screenH * 0.52) : 220,
-              marginTop: isLandscape ? 8 : Math.max(32, Math.round(screenH * 0.1)),
+              height: isLandscape
+                ? Math.round(screenH * 0.52)
+                : Math.max(200, Math.round(screenH * 0.28)),
+              marginTop: isLandscape ? 8 : Math.max(20, Math.round(screenH * 0.07)),
             },
           ]}
         >
@@ -652,7 +667,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
         {showSettings && (
           <View style={[s.settingsPanel, { backgroundColor: t.surface }]}>
             <SettingRow label="FONT SIZE" t={t}>
-              {[32, 40, 48, 60, 72, 80, 100, 120].map(sz => (
+              {[32, 40, 48, 60, 72, 80, 100, 120, 150, 200].map(sz => (
                 <Chip key={sz} label={String(sz)} active={fontSize === sz} t={t} onPress={() => { setFontSize(sz); savePrefs({ fontSize: sz }); }} />
               ))}
             </SettingRow>
@@ -713,45 +728,42 @@ export default function SpeedReader({ book, onBack, onProgress }) {
             )}
 
             <SettingRow label="HIGHLIGHT MODE" t={t}>
-              {[["ORP", "orp"], ["Center", "center"], ["Off", "off"]].map(([label, val]) => (
+              {[["Front ½", "front"], ["Back ½", "back"], ["Ctr-L", "centerl"], ["Ctr-R", "centerr"], ["Off", "off"]].map(([label, val]) => (
                 <Chip key={val} label={label} active={highlightMode === val} t={t}
                   onPress={() => { setHighlightMode(val); savePrefs({ highlightMode: val }); }} />
               ))}
             </SettingRow>
 
-            <SettingRow label="FONT COLOR" t={t}>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-                {WORD_COLORS.map(({ value, dot }) => (
-                  <TouchableOpacity
-                    key={value ?? "default"}
-                    onPress={() => { setWordColor(value); savePrefs({ wordColor: value }); }}
-                    style={[s.colorDot, { backgroundColor: dot ?? t.accent, borderColor: wordColor === value ? t.text : "transparent" }]}
-                  />
-                ))}
-              </View>
+            <View style={s.settingRow}>
+              <Text style={[s.settingLabel, { color: t.muted, fontFamily: MONO }]}>FONT COLOR</Text>
               <RgbColorPicker
                 color={wordColor ?? THEMES[theme].text}
                 onChange={c => { setWordColor(c); savePrefs({ wordColor: c }); }}
                 onReset={() => { setWordColor(null); savePrefs({ wordColor: null }); }}
+                presets={WORD_COLORS.map(({ value, dot }) => ({ value, dot: dot ?? t.accent }))}
                 t={t}
               />
-            </SettingRow>
-            <SettingRow label="ACCENT COLOR" t={t}>
+            </View>
+            <View style={s.settingRow}>
+              <Text style={[s.settingLabel, { color: t.muted, fontFamily: MONO }]}>ACCENT COLOR</Text>
               <RgbColorPicker
                 color={customAccent ?? t.accent}
                 onChange={c => { setCustomAccent(c); savePrefs({ customAccent: c }); }}
                 onReset={() => { setCustomAccent(null); savePrefs({ customAccent: null }); }}
+                presets={Object.values(THEMES).map(th => ({ value: th.accent, dot: th.accent }))}
                 t={t}
               />
-            </SettingRow>
-            <SettingRow label="BACKGROUND COLOR" t={t}>
+            </View>
+            <View style={s.settingRow}>
+              <Text style={[s.settingLabel, { color: t.muted, fontFamily: MONO }]}>BACKGROUND COLOR</Text>
               <RgbColorPicker
                 color={customBg ?? THEMES[theme].bg}
                 onChange={c => { setCustomBg(c); savePrefs({ customBg: c }); }}
                 onReset={() => { setCustomBg(null); savePrefs({ customBg: null }); }}
+                presets={Object.values(THEMES).map(th => ({ value: th.bg, dot: th.bg }))}
                 t={t}
               />
-            </SettingRow>
+            </View>
           </View>
         )}
       </ScrollView>
@@ -966,18 +978,52 @@ function RgbChannelSlider({ label, value, onChange, t }) {
   );
 }
 
-function RgbColorPicker({ color, onChange, onReset, t }) {
+function RgbColorPicker({ color, onChange, onReset, presets, t }) {
+  const [hexInput, setHexInput] = useState(color ? color.toUpperCase() : "#000000");
+  useEffect(() => { setHexInput(color ? color.toUpperCase() : "#000000"); }, [color]);
+
   const rgb = useMemo(() => {
     try { return hexToRgb(color); } catch { return { r: 128, g: 128, b: 128 }; }
   }, [color]);
 
   const update = (channel, val) => onChange(rgbToHex({ ...rgb, [channel]: val }));
 
+  const applyHex = (raw) => {
+    const h = raw.startsWith("#") ? raw : "#" + raw;
+    if (/^#[0-9A-Fa-f]{6}$/.test(h)) onChange(h.toLowerCase());
+  };
+
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ width: "100%" }}>
+      {/* Presets row */}
+      {presets?.length > 0 && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+          {presets.map(({ value, dot }, i) => (
+            <TouchableOpacity
+              key={i}
+              onPress={() => value == null ? onReset?.() : onChange(value)}
+              style={[s.colorDot, {
+                backgroundColor: dot ?? t.accent,
+                borderColor: color === value ? t.text : "transparent",
+              }]}
+            />
+          ))}
+        </View>
+      )}
+      {/* Swatch + typeable hex + reset */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: color, borderWidth: 1, borderColor: t.muted + "66" }} />
-        <Text style={{ color: t.text, fontFamily: MONO, fontSize: 11 }}>{color.toUpperCase()}</Text>
+        <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: color, borderWidth: 1, borderColor: t.muted + "66" }} />
+        <TextInput
+          style={{ color: t.text, fontFamily: MONO, fontSize: 12, borderWidth: 1, borderColor: t.muted + "44", borderRadius: 5, paddingHorizontal: 7, paddingVertical: 3, width: 82 }}
+          value={hexInput}
+          onChangeText={v => { setHexInput(v); if (v.length === 7) applyHex(v); }}
+          onBlur={() => applyHex(hexInput)}
+          onSubmitEditing={() => applyHex(hexInput)}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          maxLength={7}
+          placeholderTextColor={t.muted}
+        />
         <TouchableOpacity onPress={onReset}>
           <Text style={{ color: t.muted, fontSize: 11, fontFamily: MONO }}>reset</Text>
         </TouchableOpacity>
@@ -1062,9 +1108,20 @@ function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
   const canPrev = effectiveStart > 0;
   const canNext = effectiveEnd < words.length - 1;
 
-  const goPrev = () => setWindowStart(Math.max(0, effectiveStart - PAGE_SIZE));
-  const goNext = () => setWindowStart(Math.min(Math.max(0, words.length - 1 - PAGE_SIZE), effectiveStart + PAGE_SIZE));
-  const goNow  = () => { setWindowStart(null); scrollRef?.current?.scrollTo({ y: 0, animated: true }); };
+  const goPrev = () => {
+    const next = Math.max(0, effectiveStart - PAGE_SIZE);
+    setWindowStart(next);
+    scrollRef?.current?.scrollTo({ y: 0, animated: false });
+  };
+  const goNext = () => {
+    const next = Math.min(Math.max(0, words.length - 1 - PAGE_SIZE), effectiveStart + PAGE_SIZE);
+    setWindowStart(next);
+    scrollRef?.current?.scrollTo({ y: 0, animated: false });
+  };
+  const goNow = () => {
+    setWindowStart(null);
+    scrollRef?.current?.scrollTo({ y: 0, animated: false });
+  };
 
   // ── flow-mode: auto-scroll to current word ────────────────────────────────
   const itemRefs = useRef({});
@@ -1150,11 +1207,16 @@ function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
           <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 12 }}>◀</Text>
         </TouchableOpacity>
         {isManual && (
-          <TouchableOpacity onPress={goNow}>
-            <Text style={{ color: t.accent, fontFamily: MONO, fontSize: 10 }}>
-              {currentVisible ? "● now" : "→ now"}
-            </Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity onPress={() => onJump(effectiveStart)}>
+              <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10 }}>▶ here</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={goNow}>
+              <Text style={{ color: t.accent, fontFamily: MONO, fontSize: 10 }}>
+                {currentVisible ? "● now" : "→ now"}
+              </Text>
+            </TouchableOpacity>
+          </>
         )}
         <TouchableOpacity onPress={goNext} disabled={!canNext} style={{ opacity: canNext ? 1 : 0.3 }}>
           <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 12 }}>▶</Text>

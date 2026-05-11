@@ -764,7 +764,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
 // ── styles ────────────────────────────────────────────────────────────────────
 
 const cs = StyleSheet.create({
-  safe:   { flex: 1 },
+  safe:   { flex: 1, paddingTop: Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0 },
   header: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
     paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1,
