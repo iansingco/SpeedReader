@@ -7,6 +7,7 @@ import {
   Platform,
   SafeAreaView,
   StatusBar,
+  AppState,
   ScrollView,
   Modal,
   TextInput,
@@ -21,13 +22,13 @@ import * as storage from "./storage";
 
 // ── web-safe slider ───────────────────────────────────────────────────────────
 
-function WpmSlider({ value, onValueChange, minimumTrackTintColor, maximumTrackTintColor, thumbTintColor, style }) {
+function WpmSlider({ value, onValueChange, minimumTrackTintColor, maximumTrackTintColor, thumbTintColor, style, onSlidingStart, onSlidingComplete }) {
   if (Platform.OS === "web") {
     return (
       <input
         type="range" min={50} max={1000} step={10} value={value}
         onChange={e => onValueChange(Number(e.target.value))}
-        style={{ flex: 1, maxWidth: 260, accentColor: minimumTrackTintColor }}
+        style={{ flex: 1, maxWidth: 260, accentColor: minimumTrackTintColor, height: 28 }}
       />
     );
   }
@@ -39,6 +40,8 @@ function WpmSlider({ value, onValueChange, minimumTrackTintColor, maximumTrackTi
       minimumTrackTintColor={minimumTrackTintColor}
       maximumTrackTintColor={maximumTrackTintColor}
       thumbTintColor={thumbTintColor}
+      onSlidingStart={onSlidingStart}
+      onSlidingComplete={onSlidingComplete}
     />
   );
 }
@@ -123,6 +126,8 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   const [customAccent,  setCustomAccent]  = useState(null);
   const [customBg,      setCustomBg]      = useState(null);
 
+  const [scrollEnabled, setScrollEnabled] = useState(true);
+
   // ── annotation state ─────────────────────────────────────────────────────────
   const [annotations,       setAnnotations]       = useState(book?.annotations || {});
   const [showAnnotation,    setShowAnnotation]     = useState(null);
@@ -159,6 +164,16 @@ export default function SpeedReader({ book, onBack, onProgress }) {
       storage.saveReaderPrefs({ ...current, ...patch });
     });
   }, []);
+
+  // Auto-bookmark when app goes to background
+  useEffect(() => {
+    if (!book?.id) return;
+    const sub = AppState.addEventListener("change", state => {
+      if (state === "background" || state === "inactive")
+        storage.updatePosition(book.id, indexRef.current);
+    });
+    return () => sub.remove();
+  }, [book?.id]);
 
   // bookId drives storage persistence
   const bookId = book?.id || makeBookId(fileName);
@@ -375,6 +390,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
       <ScrollView
         contentContainerStyle={[s.container, { backgroundColor: t.bg }]}
         keyboardShouldPersistTaps="handled"
+        scrollEnabled={scrollEnabled}
       >
 
         {/* ── Header ── */}
@@ -450,7 +466,13 @@ export default function SpeedReader({ book, onBack, onProgress }) {
               </Text>
             </View>
           ) : (
-            <Text style={[s.orp, { fontSize }]} selectable={false}>
+            <Text
+              style={[s.orp, { fontSize }]}
+              selectable={false}
+              adjustsFontSizeToFit
+              numberOfLines={1}
+              minimumFontScale={0.4}
+            >
               <Text style={{ color: wordColor ?? t.accent, fontWeight: "700" }}>{bold}</Text>
               <Text style={{ color: wordColor ?? t.text,   fontWeight: "400" }}>{post}</Text>
             </Text>
@@ -540,24 +562,27 @@ export default function SpeedReader({ book, onBack, onProgress }) {
         />
 
         {/* ── Controls ── */}
-        <View style={s.controls}>
-          <Ctrl label="↺ Reset" t={t} onPress={() => { stop(); setIndex(0); setProgress(0); setFinished(false); setShowAnnotation(null); }} />
-          <Ctrl label="‹‹"     t={t} onPress={() => skipBy(-1)} />
+        <View style={s.mainControls}>
+          <Ctrl label="‹‹" t={t} onPress={() => skipBy(-1)} />
           {playing
-            ? <Ctrl label="⏸ Pause" t={t} active onPress={stop} />
-            : <Ctrl label="▶  Play"  t={t} active onPress={play} />
+            ? <Ctrl label="⏸" t={t} active onPress={stop} large />
+            : <Ctrl label="▶" t={t} active onPress={play} large />
           }
           <Ctrl label="››" t={t} onPress={() => skipBy(1)} />
+        </View>
+        <View style={s.secondaryControls}>
           <Ctrl
             label={showContext ? "▲ ctx" : "▼ ctx"}
             t={t}
             active={showContext}
             onPress={() => setShowContext(v => !v)}
+            small
           />
           <Ctrl
             label="✦ Ann"
             t={t}
             onPress={openAnnotateModal}
+            small
             style={{ borderColor: hasAnnotation ? t.accent + "aa" : t.muted + "55" }}
           />
         </View>
@@ -572,6 +597,8 @@ export default function SpeedReader({ book, onBack, onProgress }) {
             minimumTrackTintColor={t.accent}
             maximumTrackTintColor={t.muted}
             thumbTintColor={t.accent}
+            onSlidingStart={() => setScrollEnabled(false)}
+            onSlidingComplete={() => setScrollEnabled(true)}
           />
           <Text style={[s.wpmValue, { color: t.accent, fontFamily: MONO }]}>{wpm}</Text>
         </View>
@@ -788,11 +815,13 @@ export default function SpeedReader({ book, onBack, onProgress }) {
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
-function Ctrl({ label, t, active, onPress, style }) {
+function Ctrl({ label, t, active, onPress, style, large, small }) {
   return (
     <TouchableOpacity
       style={[
         s.btn,
+        large && s.btnLarge,
+        small && s.btnSmall,
         {
           borderColor:     active ? t.accent : t.muted + "88",
           backgroundColor: active ? t.accent : "transparent",
@@ -802,7 +831,7 @@ function Ctrl({ label, t, active, onPress, style }) {
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <Text style={{ color: active ? t.bg : t.text, fontFamily: MONO, fontWeight: "600", fontSize: 14 }}>
+      <Text style={{ color: active ? t.bg : t.text, fontFamily: MONO, fontWeight: "600", fontSize: large ? 22 : small ? 12 : 14 }}>
         {label}
       </Text>
     </TouchableOpacity>
@@ -1135,7 +1164,7 @@ function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
 // ── styles ────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  safe:      { flex: 1 },
+  safe:      { flex: 1, paddingTop: Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0 },
   container: { alignItems: "center", paddingHorizontal: 16, paddingBottom: 48 },
 
   header: {
@@ -1157,10 +1186,10 @@ const s = StyleSheet.create({
   fileName: { fontSize: 11, marginTop: 8, letterSpacing: 2, textTransform: "uppercase" },
 
   stage: {
-    width: "100%", maxWidth: 720, marginTop: 32,
-    borderRadius: 16, paddingVertical: 56, paddingHorizontal: 32,
+    width: "100%", maxWidth: 720, marginTop: 24,
+    borderRadius: 16, paddingVertical: 72, paddingHorizontal: 32,
     alignItems: "center", justifyContent: "center",
-    minHeight: 180, position: "relative",
+    minHeight: 220, position: "relative",
   },
   orp:       { textAlign: "center" },
   wordCount:    { fontSize: 11, letterSpacing: 2 },
@@ -1193,15 +1222,26 @@ const s = StyleSheet.create({
   progressBar:  { height: "100%", borderRadius: 99 },
   chapterMark:  { position: "absolute", top: 0, width: 2, height: "100%", opacity: 0.6 },
 
-  controls: {
+  mainControls: {
     width: "100%", maxWidth: 720, marginTop: 24,
+    flexDirection: "row", gap: 14, alignItems: "center",
+    justifyContent: "center",
+  },
+  secondaryControls: {
+    width: "100%", maxWidth: 720, marginTop: 10,
     flexDirection: "row", gap: 10, alignItems: "center",
-    justifyContent: "center", flexWrap: "wrap",
+    justifyContent: "center",
   },
   btn: {
     borderWidth: 1.5, borderRadius: 8,
     paddingHorizontal: 20, paddingVertical: 10,
     minWidth: 70, alignItems: "center",
+  },
+  btnLarge: {
+    paddingHorizontal: 36, paddingVertical: 14, minWidth: 110, borderRadius: 12,
+  },
+  btnSmall: {
+    paddingHorizontal: 14, paddingVertical: 6, minWidth: 50,
   },
 
   wpmRow: {
