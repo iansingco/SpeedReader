@@ -841,7 +841,7 @@ function Chip({ label, active, t, onPress }) {
 // ── RGB color picker ──────────────────────────────────────────────────────────
 
 function hexToRgb(hex) {
-  const h = hex.replace(“#”, “”);
+  const h = hex.replace("#", "");
   return {
     r: parseInt(h.slice(0, 2), 16),
     g: parseInt(h.slice(2, 4), 16),
@@ -850,35 +850,35 @@ function hexToRgb(hex) {
 }
 
 function rgbToHex({ r, g, b }) {
-  return “#” + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, “0”)).join(“”);
+  return "#" + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
 }
 
 function RgbChannelSlider({ label, value, onChange, t }) {
-  if (Platform.OS === “web”) {
+  if (Platform.OS === "web") {
     return (
-      <View style={{ flexDirection: “row”, alignItems: “center”, gap: 6, marginBottom: 4 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
         <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10, width: 12 }}>{label}</Text>
         <input
-          type=”range” min={0} max={255} step={1} value={value}
+          type="range" min={0} max={255} step={1} value={value}
           onChange={e => onChange(Number(e.target.value))}
           style={{ flex: 1, maxWidth: 160, accentColor: t.accent }}
         />
-        <Text style={{ color: t.text, fontFamily: MONO, fontSize: 10, width: 28, textAlign: “right” }}>{value}</Text>
+        <Text style={{ color: t.text, fontFamily: MONO, fontSize: 10, width: 28, textAlign: "right" }}>{value}</Text>
       </View>
     );
   }
   return (
-    <View style={{ flexDirection: “row”, alignItems: “center”, gap: 6, marginBottom: 4 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
       <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10, width: 12 }}>{label}</Text>
       <Slider
         style={{ flex: 1, maxWidth: 160 }}
         minimumValue={0} maximumValue={255} step={1}
         value={value} onValueChange={onChange}
         minimumTrackTintColor={t.accent}
-        maximumTrackTintColor={t.muted + “66”}
+        maximumTrackTintColor={t.muted + "66"}
         thumbTintColor={t.accent}
       />
-      <Text style={{ color: t.text, fontFamily: MONO, fontSize: 10, width: 28, textAlign: “right” }}>{value}</Text>
+      <Text style={{ color: t.text, fontFamily: MONO, fontSize: 10, width: 28, textAlign: "right" }}>{value}</Text>
     </View>
   );
 }
@@ -892,16 +892,16 @@ function RgbColorPicker({ color, onChange, onReset, t }) {
 
   return (
     <View style={{ flex: 1 }}>
-      <View style={{ flexDirection: “row”, alignItems: “center”, gap: 8, marginBottom: 8 }}>
-        <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: color, borderWidth: 1, borderColor: t.muted + “66” }} />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: color, borderWidth: 1, borderColor: t.muted + "66" }} />
         <Text style={{ color: t.text, fontFamily: MONO, fontSize: 11 }}>{color.toUpperCase()}</Text>
         <TouchableOpacity onPress={onReset}>
           <Text style={{ color: t.muted, fontSize: 11, fontFamily: MONO }}>reset</Text>
         </TouchableOpacity>
       </View>
-      <RgbChannelSlider label=”R” value={rgb.r} onChange={v => update(“r”, v)} t={t} />
-      <RgbChannelSlider label=”G” value={rgb.g} onChange={v => update(“g”, v)} t={t} />
-      <RgbChannelSlider label=”B” value={rgb.b} onChange={v => update(“b”, v)} t={t} />
+      <RgbChannelSlider label="R" value={rgb.r} onChange={v => update("r", v)} t={t} />
+      <RgbChannelSlider label="G" value={rgb.g} onChange={v => update("g", v)} t={t} />
+      <RgbChannelSlider label="B" value={rgb.b} onChange={v => update("b", v)} t={t} />
     </View>
   );
 }
@@ -927,12 +927,12 @@ function ProgressSection({ progress, index, words, wpm, chapters, t, onJump }) {
   };
 
   return (
-    <View style={{ width: “100%”, maxWidth: 720, marginTop: 16 }}>
+    <View style={{ width: "100%", maxWidth: 720, marginTop: 16 }}>
       <TouchableOpacity
         activeOpacity={0.8}
         onPress={handleTap}
         onLayout={e => setBarWidth(e.nativeEvent.layout.width)}
-        style={[s.progressWrap, { backgroundColor: t.muted + “44” }]}
+        style={[s.progressWrap, { backgroundColor: t.muted + "44" }]}
       >
         <View style={[s.progressBar, { backgroundColor: t.accent, width: `${progress}%` }]} />
         {/* Chapter marks */}
@@ -946,7 +946,7 @@ function ProgressSection({ progress, index, words, wpm, chapters, t, onJump }) {
           );
         })}
       </TouchableOpacity>
-      <View style={{ flexDirection: “row”, justifyContent: “space-between”, marginTop: 4 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
         <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10, letterSpacing: 1 }}>
           {progress}%
         </Text>
@@ -960,7 +960,7 @@ function ProgressSection({ progress, index, words, wpm, chapters, t, onJump }) {
 
 const CONTEXT_BEFORE = 150;
 const CONTEXT_AFTER  = 200;
-const SENTENCE_END   = /[.!?…][“’’”]?$/;
+const SENTENCE_END   = /[.!?…]["''"]?$/;
 
 function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
   const [pageMode, setPageMode] = useState(true);
