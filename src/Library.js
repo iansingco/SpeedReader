@@ -368,9 +368,12 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
   const openBook = useCallback(async (bookMeta) => {
     setOpeningId(bookMeta.id);
     try {
-      const words       = await storage.getWords(bookMeta.id);
-      const annotations = await storage.getAnnotations(bookMeta.id);
-      onOpenBook({ ...bookMeta, words: words || [], annotations: annotations || {} });
+      const [words, annotations, chapters] = await Promise.all([
+        storage.getWords(bookMeta.id),
+        storage.getAnnotations(bookMeta.id),
+        storage.getChapters(bookMeta.id),
+      ]);
+      onOpenBook({ ...bookMeta, words: words || [], annotations: annotations || {}, chapters: chapters || [] });
     } finally {
       setOpeningId(null);
     }
@@ -392,7 +395,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
       setLoadError(null);
 
       try {
-        const { text, meta, annotations } = await parseFile(asset);
+        const { text, meta, annotations, chapters = [] } = await parseFile(asset);
         const words  = tokenize(text);
         if (!words.length) throw new Error("No readable text found. The file may be DRM-protected or in an unsupported format.");
         const bookId = makeBookId(asset.name);
@@ -414,6 +417,8 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
         await storage.setWords(bookId, words);
         if (Object.keys(annotations).length > 0)
           await storage.setAnnotations(bookId, annotations);
+        if (chapters.length > 0)
+          await storage.setChapters(bookId, chapters);
 
         setBooks(prev => {
           const idx = prev.findIndex(b => b.id === bookId);
@@ -422,7 +427,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
         });
 
         // Auto-open immediately after adding
-        onOpenBook({ ...bookMeta, words, annotations });
+        onOpenBook({ ...bookMeta, words, annotations, chapters });
       } catch (err) {
         setLoadError(err.message);
         console.error("Parse error:", err);
@@ -464,7 +469,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
     setLoadError(null);
     try {
       const asset = { uri: item.path, name: item.name };
-      const { text, meta, annotations } = await parseFile(asset);
+      const { text, meta, annotations, chapters = [] } = await parseFile(asset);
       const words = tokenize(text);
       if (!words.length) throw new Error("No readable text found. The file may be DRM-protected.");
       const bookId = makeBookId(item.name);
@@ -483,13 +488,15 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
       await storage.setWords(bookId, words);
       if (Object.keys(annotations).length > 0)
         await storage.setAnnotations(bookId, annotations);
+      if (chapters.length > 0)
+        await storage.setChapters(bookId, chapters);
       setBooks(prev => {
         const idx = prev.findIndex(b => b.id === bookId);
         if (idx >= 0) { const u = [...prev]; u[idx] = bookMeta; return u; }
         return [bookMeta, ...prev];
       });
       setShowFolders(false);
-      onOpenBook({ ...bookMeta, words, annotations });
+      onOpenBook({ ...bookMeta, words, annotations, chapters });
     } catch (err) {
       Alert.alert("Import Failed", err.message);
     } finally {
@@ -514,7 +521,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
       }
       const assetName = name || `${title}.epub`;
       const asset  = { uri: parseUri, name: assetName };
-      const { text, meta, annotations } = await parseFile(asset);
+      const { text, meta, annotations, chapters = [] } = await parseFile(asset);
       if (Platform.OS === "web" && parseUri !== uri) URL.revokeObjectURL(parseUri);
       const words  = tokenize(text);
       if (!words.length) throw new Error("No readable text found. The file may be DRM-protected or in an unsupported format.");
@@ -537,6 +544,8 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
       await storage.setWords(bookId, words);
       if (Object.keys(annotations).length > 0)
         await storage.setAnnotations(bookId, annotations);
+      if (chapters.length > 0)
+        await storage.setChapters(bookId, chapters);
 
       setBooks(prev => {
         const idx = prev.findIndex(b => b.id === bookId);
@@ -545,7 +554,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
       });
 
       setShowCalibre(false);
-      onOpenBook({ ...bookMeta, words, annotations });
+      onOpenBook({ ...bookMeta, words, annotations, chapters });
     } catch (err) {
       Alert.alert("Import Failed", err.message);
     } finally {

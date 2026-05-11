@@ -3,7 +3,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const LIBRARY_KEY  = "sr_library_v1";
 const WORDS_PREFIX = "sr_words_v1_";
 const ANN_PREFIX   = "sr_ann_v1_";
+const CHAPS_PREFIX = "sr_chaps_v1_";
 const CALIBRE_KEY  = "sr_calibre_v1";
+const PREFS_KEY    = "sr_prefs_v1";
 
 // ── library list (metadata only, no words) ────────────────────────────────────
 
@@ -31,6 +33,7 @@ export async function removeBook(bookId) {
   await saveLibraryList(list.filter(b => b.id !== bookId));
   await AsyncStorage.removeItem(WORDS_PREFIX + bookId);
   await AsyncStorage.removeItem(ANN_PREFIX + bookId);
+  await AsyncStorage.removeItem(CHAPS_PREFIX + bookId);
 }
 
 export async function updatePosition(bookId, position) {
@@ -53,6 +56,32 @@ export async function getWords(bookId) {
 
 export async function setWords(bookId, words) {
   await AsyncStorage.setItem(WORDS_PREFIX + bookId, JSON.stringify(words));
+}
+
+// ── chapters ──────────────────────────────────────────────────────────────────
+
+export async function getChapters(bookId) {
+  try {
+    const json = await AsyncStorage.getItem(CHAPS_PREFIX + bookId);
+    return json ? JSON.parse(json) : [];
+  } catch { return []; }
+}
+
+export async function setChapters(bookId, chapters) {
+  await AsyncStorage.setItem(CHAPS_PREFIX + bookId, JSON.stringify(chapters));
+}
+
+// ── reader prefs ──────────────────────────────────────────────────────────────
+
+export async function getReaderPrefs() {
+  try {
+    const json = await AsyncStorage.getItem(PREFS_KEY);
+    return json ? JSON.parse(json) : {};
+  } catch { return {}; }
+}
+
+export async function saveReaderPrefs(prefs) {
+  await AsyncStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
 }
 
 // ── annotations ───────────────────────────────────────────────────────────────

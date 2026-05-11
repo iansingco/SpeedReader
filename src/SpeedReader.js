@@ -119,6 +119,9 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   const [skipAmount,    setSkipAmount]    = useState(20);
   const [pauseStrength, setPauseStrength] = useState(1);
   const [customPause,   setCustomPause]   = useState({ sentence: 2.5, semi: 1.8, comma: 1.4 });
+  const [chapters,      setChapters]      = useState(book?.chapters || []);
+  const [customAccent,  setCustomAccent]  = useState(null);
+  const [customBg,      setCustomBg]      = useState(null);
 
   // ── annotation state ─────────────────────────────────────────────────────────
   const [annotations,       setAnnotations]       = useState(book?.annotations || {});
@@ -137,6 +140,26 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   const customPauseRef    = useRef(customPause);
   useEffect(() => { customPauseRef.current = customPause; }, [customPause]);
 
+  // Load persisted reader prefs once on mount
+  useEffect(() => {
+    storage.getReaderPrefs().then(prefs => {
+      if (prefs.wpm)          setWpm(prefs.wpm);
+      if (prefs.fontSize)     setFontSize(prefs.fontSize);
+      if (prefs.chunkSize)    setChunkSize(prefs.chunkSize);
+      if (prefs.skipAmount !== undefined) setSkipAmount(prefs.skipAmount);
+      if (prefs.pauseStrength !== undefined) setPauseStrength(prefs.pauseStrength);
+      if (prefs.customAccent) setCustomAccent(prefs.customAccent);
+      if (prefs.customBg)     setCustomBg(prefs.customBg);
+      if (prefs.wordColor !== undefined) setWordColor(prefs.wordColor);
+    });
+  }, []);
+
+  const savePrefs = useCallback((patch) => {
+    storage.getReaderPrefs().then(current => {
+      storage.saveReaderPrefs({ ...current, ...patch });
+    });
+  }, []);
+
   // bookId drives storage persistence
   const bookId = book?.id || makeBookId(fileName);
 
@@ -146,7 +169,14 @@ export default function SpeedReader({ book, onBack, onProgress }) {
   const annotationsRef = useRef(annotations);
   useEffect(() => { annotationsRef.current = annotations; }, [annotations]);
 
-  const t     = THEMES[theme];
+  const t     = useMemo(() => {
+    const base = THEMES[theme];
+    return {
+      ...base,
+      ...(customAccent ? { accent: customAccent } : {}),
+      ...(customBg     ? { bg: customBg, surface: customBg + "dd" } : {}),
+    };
+  }, [theme, customAccent, customBg]);
   const delay = Math.round((60 / wpm) * 1000 * chunkSize);
 
   // Keep progress in sync when index changes externally (e.g. nav)
@@ -406,8 +436,12 @@ export default function SpeedReader({ book, onBack, onProgress }) {
           </TouchableOpacity>
         )}
 
-        {/* ── RSVP stage ── */}
-        <View style={[s.stage, { backgroundColor: t.surface }]}>
+        {/* ── RSVP stage — tap to play/pause ── */}
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => playing ? stop() : play()}
+          style={[s.stage, { backgroundColor: t.surface }]}
+        >
           {finished ? (
             <View style={s.finishBadge}>
               <Text style={[s.finishText, { color: t.accent, fontFamily: MONO }]}>✦ Finished</Text>
@@ -424,7 +458,7 @@ export default function SpeedReader({ book, onBack, onProgress }) {
           {/* Word counter — tap to open jump-to-word */}
           <TouchableOpacity
             style={s.wordCountBtn}
-            onPress={() => { setJumpInput(String(index + 1)); setShowJumpModal(true); }}
+            onPress={(e) => { e.stopPropagation?.(); setJumpInput(String(index + 1)); setShowJumpModal(true); }}
             activeOpacity={0.6}
           >
             <Text style={[s.wordCount, { color: hasAnnotation ? t.accent : t.muted, fontFamily: MONO }]}>
@@ -434,10 +468,14 @@ export default function SpeedReader({ book, onBack, onProgress }) {
           {hasAnnotation && !showAnnotation && (
             <TouchableOpacity
               style={[s.annDot, { backgroundColor: t.accent }]}
-              onPress={() => setShowAnnotation(annotations[index])}
+              onPress={(e) => { e.stopPropagation?.(); setShowAnnotation(annotations[index]); }}
             />
           )}
-        </View>
+          {/* Play/pause hint */}
+          {!playing && !finished && (
+            <Text style={[s.stagePauseHint, { color: t.muted }]}>▶ tap to play</Text>
+          )}
+        </TouchableOpacity>
 
         {/* ── Annotation popup ── */}
         {showAnnotation && (
@@ -483,16 +521,23 @@ export default function SpeedReader({ book, onBack, onProgress }) {
           <ContextPanel
             words={words}
             currentIndex={index}
+            chapters={chapters}
             t={t}
             scrollRef={contextScrollRef}
             onJump={(i) => { stop(); setIndex(i); setShowAnnotation(null); }}
           />
         )}
 
-        {/* ── Progress bar ── */}
-        <View style={[s.progressWrap, { backgroundColor: t.muted + "44" }]}>
-          <View style={[s.progressBar, { backgroundColor: t.accent, width: `${progress}%` }]} />
-        </View>
+        {/* ── Progress bar + ETA ── */}
+        <ProgressSection
+          progress={progress}
+          index={index}
+          words={words}
+          wpm={wpm}
+          chapters={chapters}
+          t={t}
+          onJump={(i) => { stop(); setIndex(i); setShowAnnotation(null); }}
+        />
 
         {/* ── Controls ── */}
         <View style={s.controls}>
@@ -548,13 +593,29 @@ export default function SpeedReader({ book, onBack, onProgress }) {
               {WORD_COLORS.map(({ value, dot }) => (
                 <TouchableOpacity
                   key={value ?? "default"}
-                  onPress={() => setWordColor(value)}
+                  onPress={() => { setWordColor(value); savePrefs({ wordColor: value }); }}
                   style={[
                     s.colorDot,
                     { backgroundColor: dot ?? t.accent, borderColor: wordColor === value ? t.text : "transparent" },
                   ]}
                 />
               ))}
+            </SettingRow>
+            <SettingRow label="ACCENT COLOR" t={t}>
+              <RgbColorPicker
+                color={customAccent ?? t.accent}
+                onChange={c => { setCustomAccent(c); savePrefs({ customAccent: c }); }}
+                onReset={() => { setCustomAccent(null); savePrefs({ customAccent: null }); }}
+                t={t}
+              />
+            </SettingRow>
+            <SettingRow label="BACKGROUND COLOR" t={t}>
+              <RgbColorPicker
+                color={customBg ?? THEMES[theme].bg}
+                onChange={c => { setCustomBg(c); savePrefs({ customBg: c }); }}
+                onReset={() => { setCustomBg(null); savePrefs({ customBg: null }); }}
+                t={t}
+              />
             </SettingRow>
             <SettingRow label="SKIP AMOUNT" t={t}>
               {[10, 20, 50, "sentence"].map(n => (
@@ -777,12 +838,132 @@ function Chip({ label, active, t, onPress }) {
   );
 }
 
+// ── RGB color picker ──────────────────────────────────────────────────────────
+
+function hexToRgb(hex) {
+  const h = hex.replace(“#”, “”);
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
+function rgbToHex({ r, g, b }) {
+  return “#” + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, “0”)).join(“”);
+}
+
+function RgbChannelSlider({ label, value, onChange, t }) {
+  if (Platform.OS === “web”) {
+    return (
+      <View style={{ flexDirection: “row”, alignItems: “center”, gap: 6, marginBottom: 4 }}>
+        <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10, width: 12 }}>{label}</Text>
+        <input
+          type=”range” min={0} max={255} step={1} value={value}
+          onChange={e => onChange(Number(e.target.value))}
+          style={{ flex: 1, maxWidth: 160, accentColor: t.accent }}
+        />
+        <Text style={{ color: t.text, fontFamily: MONO, fontSize: 10, width: 28, textAlign: “right” }}>{value}</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={{ flexDirection: “row”, alignItems: “center”, gap: 6, marginBottom: 4 }}>
+      <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10, width: 12 }}>{label}</Text>
+      <Slider
+        style={{ flex: 1, maxWidth: 160 }}
+        minimumValue={0} maximumValue={255} step={1}
+        value={value} onValueChange={onChange}
+        minimumTrackTintColor={t.accent}
+        maximumTrackTintColor={t.muted + “66”}
+        thumbTintColor={t.accent}
+      />
+      <Text style={{ color: t.text, fontFamily: MONO, fontSize: 10, width: 28, textAlign: “right” }}>{value}</Text>
+    </View>
+  );
+}
+
+function RgbColorPicker({ color, onChange, onReset, t }) {
+  const rgb = useMemo(() => {
+    try { return hexToRgb(color); } catch { return { r: 128, g: 128, b: 128 }; }
+  }, [color]);
+
+  const update = (channel, val) => onChange(rgbToHex({ ...rgb, [channel]: val }));
+
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={{ flexDirection: “row”, alignItems: “center”, gap: 8, marginBottom: 8 }}>
+        <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: color, borderWidth: 1, borderColor: t.muted + “66” }} />
+        <Text style={{ color: t.text, fontFamily: MONO, fontSize: 11 }}>{color.toUpperCase()}</Text>
+        <TouchableOpacity onPress={onReset}>
+          <Text style={{ color: t.muted, fontSize: 11, fontFamily: MONO }}>reset</Text>
+        </TouchableOpacity>
+      </View>
+      <RgbChannelSlider label=”R” value={rgb.r} onChange={v => update(“r”, v)} t={t} />
+      <RgbChannelSlider label=”G” value={rgb.g} onChange={v => update(“g”, v)} t={t} />
+      <RgbChannelSlider label=”B” value={rgb.b} onChange={v => update(“b”, v)} t={t} />
+    </View>
+  );
+}
+
+// ── progress section ──────────────────────────────────────────────────────────
+
+function ProgressSection({ progress, index, words, wpm, chapters, t, onJump }) {
+  const [barWidth, setBarWidth] = useState(0);
+
+  const wordsLeft   = Math.max(0, words.length - index);
+  const minsLeft    = wordsLeft / Math.max(1, wpm);
+  const etaStr      = minsLeft < 1
+    ? `< 1 min`
+    : minsLeft < 60
+      ? `${Math.round(minsLeft)} min`
+      : `${Math.floor(minsLeft / 60)}h ${Math.round(minsLeft % 60)}m`;
+
+  const handleTap = (e) => {
+    if (!barWidth) return;
+    const x   = e.nativeEvent.locationX;
+    const pct = Math.max(0, Math.min(1, x / barWidth));
+    onJump(Math.round(pct * (words.length - 1)));
+  };
+
+  return (
+    <View style={{ width: “100%”, maxWidth: 720, marginTop: 16 }}>
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={handleTap}
+        onLayout={e => setBarWidth(e.nativeEvent.layout.width)}
+        style={[s.progressWrap, { backgroundColor: t.muted + “44” }]}
+      >
+        <View style={[s.progressBar, { backgroundColor: t.accent, width: `${progress}%` }]} />
+        {/* Chapter marks */}
+        {chapters.map((ch, i) => {
+          const pct = ch.wordIndex / Math.max(1, words.length - 1);
+          return (
+            <View
+              key={i}
+              style={[s.chapterMark, { left: `${pct * 100}%`, backgroundColor: t.bg }]}
+            />
+          );
+        })}
+      </TouchableOpacity>
+      <View style={{ flexDirection: “row”, justifyContent: “space-between”, marginTop: 4 }}>
+        <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10, letterSpacing: 1 }}>
+          {progress}%
+        </Text>
+        <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10, letterSpacing: 1 }}>
+          {etaStr} left
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 const CONTEXT_BEFORE = 150;
 const CONTEXT_AFTER  = 200;
-const SENTENCE_END   = /[.!?…]["'’”]?$/;
+const SENTENCE_END   = /[.!?…][“’’”]?$/;
 
-function ContextPanel({ words, currentIndex, t, scrollRef, onJump }) {
-  const [pageMode, setPageMode] = useState(false);
+function ContextPanel({ words, currentIndex, chapters, t, scrollRef, onJump }) {
+  const [pageMode, setPageMode] = useState(true);
 
   const start = Math.max(0, currentIndex - CONTEXT_BEFORE);
   const end   = Math.min(words.length - 1, currentIndex + CONTEXT_AFTER);
@@ -828,15 +1009,57 @@ function ContextPanel({ words, currentIndex, t, scrollRef, onJump }) {
     return result;
   }, [slice, start]);
 
-  const toggle = (
-    <TouchableOpacity
-      onPress={() => setPageMode(v => !v)}
-      style={s.ctxToggle}
-    >
-      <Text style={{ color: t.accent, fontFamily: MONO, fontSize: 10, letterSpacing: 1 }}>
-        {pageMode ? "≡ FLOW" : "¶ PAGE"}
-      </Text>
-    </TouchableOpacity>
+  // Chapter navigation
+  const currentChapter = useMemo(() => {
+    if (!chapters?.length) return null;
+    let ch = chapters[0];
+    for (const c of chapters) {
+      if (c.wordIndex <= currentIndex) ch = c;
+      else break;
+    }
+    return ch;
+  }, [chapters, currentIndex]);
+
+  const prevChapter = useMemo(() => {
+    if (!chapters?.length) return null;
+    const idx = chapters.indexOf(currentChapter);
+    return idx > 0 ? chapters[idx - 1] : null;
+  }, [chapters, currentChapter]);
+
+  const nextChapter = useMemo(() => {
+    if (!chapters?.length) return null;
+    const idx = chapters.indexOf(currentChapter);
+    return idx >= 0 && idx < chapters.length - 1 ? chapters[idx + 1] : null;
+  }, [chapters, currentChapter]);
+
+  const header = (
+    <View style={s.ctxHeader}>
+      {currentChapter && (
+        <Text style={{ color: t.accent, fontFamily: MONO, fontSize: 10, letterSpacing: 1, flex: 1 }} numberOfLines={1}>
+          {currentChapter.title}
+        </Text>
+      )}
+      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+        {prevChapter && (
+          <TouchableOpacity onPress={() => onJump(prevChapter.wordIndex)}>
+            <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10 }}>‹ prev ch</Text>
+          </TouchableOpacity>
+        )}
+        {nextChapter && (
+          <TouchableOpacity onPress={() => onJump(nextChapter.wordIndex)}>
+            <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10 }}>next ch ›</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          onPress={() => setPageMode(v => !v)}
+          style={s.ctxToggle}
+        >
+          <Text style={{ color: t.accent, fontFamily: MONO, fontSize: 10, letterSpacing: 1 }}>
+            {pageMode ? "≡ FLOW" : "¶ PAGE"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 
   return (
@@ -846,7 +1069,7 @@ function ContextPanel({ words, currentIndex, t, scrollRef, onJump }) {
       contentContainerStyle={s.ctxContent}
       showsVerticalScrollIndicator={false}
     >
-      {toggle}
+      {header}
 
       {pageMode ? (
         // ── page view: sentence-blocked layout ──────────────────────────────
@@ -942,6 +1165,7 @@ const s = StyleSheet.create({
   orp:       { textAlign: "center" },
   wordCount:    { fontSize: 11, letterSpacing: 2 },
   wordCountBtn: { position: "absolute", bottom: 16, right: 20 },
+  stagePauseHint: { position: "absolute", bottom: 14, left: 0, right: 0, textAlign: "center", fontSize: 10, letterSpacing: 1.5 },
   annDot: {
     position: "absolute", top: 14, right: 14,
     width: 8, height: 8, borderRadius: 4,
@@ -965,8 +1189,9 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 7,
   },
 
-  progressWrap: { width: "100%", maxWidth: 720, marginTop: 16, height: 3, borderRadius: 99 },
+  progressWrap: { width: "100%", height: 6, borderRadius: 99, overflow: "hidden" },
   progressBar:  { height: "100%", borderRadius: 99 },
+  chapterMark:  { position: "absolute", top: 0, width: 2, height: "100%", opacity: 0.6 },
 
   controls: {
     width: "100%", maxWidth: 720, marginTop: 24,
@@ -1033,10 +1258,11 @@ const s = StyleSheet.create({
   // Context panel
   ctxPanel: {
     width: "100%", maxWidth: 720, marginTop: 16,
-    maxHeight: 220, borderWidth: 1, borderRadius: 12,
+    maxHeight: 320, borderWidth: 1, borderRadius: 12,
   },
   ctxContent:  { padding: 14 },
-  ctxToggle:   { alignSelf: "flex-end", marginBottom: 6 },
+  ctxHeader:   { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 },
+  ctxToggle:   { paddingHorizontal: 4 },
   ctxWords:    { flexDirection: "row", flexWrap: "wrap" },
   ctxWord:     { fontSize: 14, lineHeight: 22, paddingHorizontal: 2 },
   ctxSentence: { marginBottom: 10 },
