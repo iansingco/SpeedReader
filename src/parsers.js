@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
+import { parsePDF } from "./pdfParser";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ async function loadBuffer(uri) {
   if (Platform.OS === "web") {
     return (await fetch(uri)).arrayBuffer();
   }
-  const b64  = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+  const b64  = await FileSystem.readAsStringAsync(uri, { encoding: "base64" });
   const bin  = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -50,44 +51,50 @@ function htmlToText(html) {
   );
 }
 
-// ── PDF ───────────────────────────────────────────────────────────────────────
+// ── EPUB chapter extraction ───────────────────────────────────────────────────
 
-async function parsePDF(uri) {
-  const pdfjsLib = await import("pdfjs-dist");
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+async function extractChapters(zip, opf, opfDir, manifest, spine) {
+  const chapters = [];
 
-  const data = await (await fetch(uri)).arrayBuffer();
-  const pdf  = await pdfjsLib.getDocument({ data }).promise;
-
-  // Metadata
-  let title = "", author = "";
-  try {
-    const info = (await pdf.getMetadata())?.info;
-    title  = info?.Title  || "";
-    author = info?.Author || "";
-  } catch {}
-
-  // Cover — render page 1 to canvas (web only)
-  let coverDataUrl = null;
-  try {
-    const page     = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: 0.5 });
-    const canvas   = document.createElement("canvas");
-    canvas.width   = viewport.width;
-    canvas.height  = viewport.height;
-    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-    coverDataUrl = canvas.toDataURL("image/jpeg", 0.7);
-  } catch {}
-
-  // Text
-  const pages = [];
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page    = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    pages.push(content.items.map(item => item.str).join(" "));
+  // Try NCX (EPUB2)
+  const ncxHref = (() => {
+    const ncxId = opf.match(/\btoc="([^"]+)"/i)?.[1];
+    if (ncxId && manifest[ncxId]) return manifest[ncxId];
+    return Object.values(manifest).find(h => h.endsWith(".ncx"));
+  })();
+  if (ncxHref) {
+    const ncx = await (zip.file(opfDir + ncxHref) ?? zip.file(ncxHref))?.async("string");
+    if (ncx) {
+      for (const m of ncx.matchAll(/<navPoint[\s\S]*?<text>([^<]+)<\/text>[\s\S]*?<content\s+src="([^"#]+)/gi))
+        chapters.push({ title: m[1].trim(), href: decodeURIComponent(m[2].trim()) });
+    }
   }
 
-  return { text: pages.join("\n"), meta: { title, author, coverDataUrl }, annotations: {} };
+  // Try NAV (EPUB3) if NCX empty
+  if (!chapters.length) {
+    for (const m of opf.matchAll(/<item\s([^>]+?)\/?\s*>/gi)) {
+      const attrs = m[1];
+      if (!/properties="[^"]*nav/.test(attrs)) continue;
+      const navHref = attrs.match(/\bhref="([^"]+)"/)?.[1];
+      if (!navHref) continue;
+      const nav = await (zip.file(opfDir + navHref) ?? zip.file(navHref))?.async("string");
+      const tocSection = nav?.match(/<nav[^>]*epub:type="toc"[^>]*>([\s\S]*?)<\/nav>/i)?.[1];
+      if (!tocSection) continue;
+      for (const lm of tocSection.matchAll(/<a[^>]+href="([^"#]+)[^"]*">([^<]+)<\/a>/gi))
+        chapters.push({ title: lm[2].trim(), href: decodeURIComponent(lm[1].trim()) });
+      break;
+    }
+  }
+
+  // Map chapter hrefs to word indices using spine order
+  const spineBasenames = spine.map(h => h.split("/").pop().split("?")[0]);
+  return chapters
+    .map(ch => {
+      const chBase = ch.href.split("/").pop().split("?")[0];
+      const spineIdx = spineBasenames.findIndex(b => b === chBase);
+      return { title: ch.title, spineIdx };
+    })
+    .filter(ch => ch.spineIdx >= 0);
 }
 
 // ── EPUB ──────────────────────────────────────────────────────────────────────
@@ -166,11 +173,13 @@ async function parseEPUB(uri) {
   }
 
   // Second pass — extract text and map noterefs to approximate word indices
-  const parts       = [];
-  const annotations = {};
-  let   globalWords = 0;
+  const parts            = [];
+  const annotations      = {};
+  const spineWordOffsets = {}; // href → globalWords at start of that spine item
+  let   globalWords      = 0;
 
   for (const href of spine) {
+    spineWordOffsets[href] = globalWords;
     const html = await (zip.file(opfDir + href) ?? zip.file(href))?.async("string");
     if (!html) continue;
 
@@ -200,7 +209,15 @@ async function parseEPUB(uri) {
   }
 
   if (!parts.length) throw new Error("No readable text found in EPUB.");
-  return { text: parts.join(" "), meta: { title, author, coverDataUrl }, annotations };
+
+  // Build chapters with word indices
+  const rawChapters = await extractChapters(zip, opf, opfDir, manifest, spine);
+  const chapters = rawChapters.map(ch => ({
+    title:     ch.title,
+    wordIndex: spineWordOffsets[spine[ch.spineIdx]] ?? 0,
+  }));
+
+  return { text: parts.join(" "), meta: { title, author, coverDataUrl }, annotations, chapters };
 }
 
 // ── MOBI ──────────────────────────────────────────────────────────────────────
@@ -285,7 +302,7 @@ async function parseMOBI(uri) {
   }
 
   if (!parts.length) throw new Error("No readable text found in MOBI file.");
-  return { text: parts.join(" "), meta: { title: "", author: "", coverDataUrl: null }, annotations: {} };
+  return { text: parts.join(" "), meta: { title: "", author: "", coverDataUrl: null }, annotations: {}, chapters: [] };
 }
 
 // ── dispatcher ────────────────────────────────────────────────────────────────
@@ -306,5 +323,5 @@ export async function parseFile(asset) {
   const text = Platform.OS === "web"
     ? await (await fetch(asset.uri)).text()
     : await FileSystem.readAsStringAsync(asset.uri);
-  return { text, meta: { title: "", author: "", coverDataUrl: null }, annotations: {} };
+  return { text, meta: { title: "", author: "", coverDataUrl: null }, annotations: {}, chapters: [] };
 }

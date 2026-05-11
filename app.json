@@ -3,7 +3,7 @@
     "name": "SwiftRead",
     "slug": "swiftread",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
@@ -11,6 +11,7 @@
     },
     "android": {
       "package": "com.swiftread.app",
+      "permissions": ["READ_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE"],
       "adaptiveIcon": {
         "backgroundColor": "#0a0a0f"
       }

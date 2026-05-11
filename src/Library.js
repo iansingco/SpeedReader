@@ -7,6 +7,7 @@ import {
   Image,
   Alert,
   Modal,
+  ScrollView,
   StyleSheet,
   SafeAreaView,
   StatusBar,
@@ -16,6 +17,7 @@ import {
   TextInput,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { THEMES, MONO } from "./constants";
 import * as storage from "./storage";
 import { parseFile, tokenize, makeBookId } from "./parsers";
@@ -141,6 +143,193 @@ function BookRow({ book, onPress, onLongPress, t }) {
   );
 }
 
+// ── local folders ─────────────────────────────────────────────────────────────
+
+const SUPPORTED_EXTS = /\.(epub|mobi|azw|txt|md)$/i;
+const KINDLE_DEFAULT = "file:///storage/emulated/0/Kindle";
+
+function LocalFoldersModal({ visible, onClose, t, importedIds, onImport }) {
+  const [folders,     setFolders]     = useState([]);
+  const [newPath,     setNewPath]     = useState("");
+  const [scanResults, setScanResults] = useState({});
+  const [scanning,    setScanning]    = useState(false);
+  const [scanError,   setScanError]   = useState("");
+
+  useEffect(() => {
+    if (!visible) return;
+    storage.getLocalFolders().then(saved => {
+      if (saved.length === 0 && Platform.OS === "android") {
+        const defaults = [KINDLE_DEFAULT];
+        setFolders(defaults);
+        storage.saveLocalFolders(defaults);
+      } else {
+        setFolders(saved);
+      }
+    });
+    setScanResults({});
+    setScanError("");
+  }, [visible]);
+
+  const persistFolders = async (list) => {
+    setFolders(list);
+    await storage.saveLocalFolders(list);
+  };
+
+  const addFolder = () => {
+    const raw = newPath.trim();
+    if (!raw) return;
+    const normalized = (Platform.OS !== "web" && !raw.startsWith("file://"))
+      ? "file://" + raw
+      : raw;
+    if (folders.includes(normalized)) return;
+    persistFolders([...folders, normalized]);
+    setNewPath("");
+  };
+
+  const removeFolder = (path) => {
+    persistFolders(folders.filter(f => f !== path));
+    setScanResults(prev => { const n = { ...prev }; delete n[path]; return n; });
+  };
+
+  const scan = async () => {
+    setScanning(true);
+    setScanError("");
+    const results = {};
+    for (const folder of folders) {
+      try {
+        const items = await FileSystem.readDirectoryAsync(folder);
+        results[folder] = items
+          .filter(name => SUPPORTED_EXTS.test(name))
+          .map(name => ({
+            name,
+            path: folder.replace(/\/$/, "") + "/" + name,
+            format: name.split(".").pop().toLowerCase(),
+          }));
+      } catch {
+        results[folder] = null;
+      }
+    }
+    setScanResults(results);
+    setScanning(false);
+    const total = Object.values(results).reduce((s, r) => s + (r?.length ?? 0), 0);
+    const inaccessible = Object.values(results).filter(r => r === null).length;
+    if (total === 0 && folders.length > 0) {
+      setScanError(
+        inaccessible > 0
+          ? "Folders not accessible. On Android 13+ grant 'All files access' in Settings → Apps → SwiftRead → Permissions."
+          : "No supported books found in the configured folders."
+      );
+    }
+  };
+
+  const totalFound = Object.values(scanResults).reduce((s, r) => s + (r?.length ?? 0), 0);
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={[cs.safe, { backgroundColor: t.bg }]}>
+        <View style={[cs.header, { borderBottomColor: t.muted + "44" }]}>
+          <Text style={[cs.logo, { color: t.accent, fontFamily: MONO }]}>Local Folders</Text>
+          <TouchableOpacity onPress={onClose} style={{ padding: 8 }}>
+            <Text style={{ color: t.muted, fontSize: 20 }}>✕</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 12 }}>
+          <Text style={{ color: t.muted, fontSize: 12 }}>
+            Scan local folders for EPUB, MOBI, AZW, TXT, and MD files.
+            DRM-protected Kindle books cannot be read.
+          </Text>
+
+          {folders.map(folder => (
+            <View key={folder} style={[cs.folderRow, { borderColor: t.muted + "33", backgroundColor: t.surface }]}>
+              <Text style={{ color: t.text, flex: 1, fontSize: 11, fontFamily: MONO }} numberOfLines={2}>
+                {folder}
+              </Text>
+              {scanResults[folder] === null && (
+                <Text style={{ color: "#e05050", fontSize: 10, marginRight: 4 }}>✗</Text>
+              )}
+              {Array.isArray(scanResults[folder]) && (
+                <Text style={{ color: t.accent, fontSize: 10, marginRight: 4, fontFamily: MONO }}>
+                  {scanResults[folder].length}
+                </Text>
+              )}
+              <TouchableOpacity onPress={() => removeFolder(folder)}>
+                <Text style={{ color: t.muted, fontSize: 16, paddingLeft: 4 }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <TextInput
+              style={[cs.searchInput, { flex: 1, color: t.text, borderColor: t.muted + "44", backgroundColor: t.surface }]}
+              value={newPath}
+              onChangeText={setNewPath}
+              placeholder={Platform.OS === "android" ? "/storage/emulated/0/Books" : "/path/to/books"}
+              placeholderTextColor={t.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              onSubmitEditing={addFolder}
+            />
+            <TouchableOpacity
+              style={[cs.addBtn, { backgroundColor: t.accent, width: 56, borderRadius: 8 }]}
+              onPress={addFolder}
+            >
+              <Text style={{ color: t.bg, fontFamily: MONO, fontSize: 13 }}>Add</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={[cs.emptyBtn, { backgroundColor: scanning ? t.muted : t.accent, opacity: folders.length === 0 ? 0.4 : 1 }]}
+            onPress={scan}
+            disabled={scanning || folders.length === 0}
+          >
+            {scanning
+              ? <ActivityIndicator color={t.bg} />
+              : <Text style={{ color: t.bg, fontFamily: MONO, fontSize: 14, fontWeight: "600" }}>Scan Folders</Text>
+            }
+          </TouchableOpacity>
+
+          {!!scanError && (
+            <Text style={{ color: "#e05050", fontSize: 12 }}>{scanError}</Text>
+          )}
+
+          {totalFound > 0 && (
+            <>
+              <Text style={{ color: t.muted, fontFamily: MONO, fontSize: 10, letterSpacing: 1, marginTop: 8 }}>
+                FOUND {totalFound} FILE{totalFound !== 1 ? "S" : ""}
+              </Text>
+              {Object.entries(scanResults).flatMap(([, items]) =>
+                (items ?? []).map(item => {
+                  const alreadyIn = importedIds.has(makeBookId(item.name));
+                  return (
+                    <View key={item.path} style={[cs.folderRow, { borderColor: t.muted + "22", backgroundColor: t.surface }]}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: t.text, fontSize: 13 }} numberOfLines={1}>{item.name}</Text>
+                        <Text style={{ color: t.muted, fontSize: 10, fontFamily: MONO }}>{item.format.toUpperCase()}</Text>
+                      </View>
+                      {alreadyIn
+                        ? <Text style={{ color: t.accent, fontSize: 11, fontFamily: MONO }}>✓ In library</Text>
+                        : (
+                          <TouchableOpacity
+                            style={[cs.sortChip, { borderColor: t.accent, backgroundColor: t.accent + "22" }]}
+                            onPress={() => onImport(item)}
+                          >
+                            <Text style={{ color: t.accent, fontSize: 11, fontFamily: MONO }}>Import</Text>
+                          </TouchableOpacity>
+                        )
+                      }
+                    </View>
+                  );
+                })
+              )}
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
 export default function Library({ theme, onChangeTheme, onOpenBook }) {
@@ -149,6 +338,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
   const [loadingName,  setLoadingName]  = useState("");
   const [loadError,    setLoadError]    = useState(null);
   const [showCalibre,  setShowCalibre]  = useState(false);
+  const [showFolders,  setShowFolders]  = useState(false);
   const [openingId,    setOpeningId]    = useState(null);
   const [numCols,      setNumCols]      = useState(2);
   const [searchQuery,  setSearchQuery]  = useState("");
@@ -178,9 +368,12 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
   const openBook = useCallback(async (bookMeta) => {
     setOpeningId(bookMeta.id);
     try {
-      const words       = await storage.getWords(bookMeta.id);
-      const annotations = await storage.getAnnotations(bookMeta.id);
-      onOpenBook({ ...bookMeta, words: words || [], annotations: annotations || {} });
+      const [words, annotations, chapters] = await Promise.all([
+        storage.getWords(bookMeta.id),
+        storage.getAnnotations(bookMeta.id),
+        storage.getChapters(bookMeta.id),
+      ]);
+      onOpenBook({ ...bookMeta, words: words || [], annotations: annotations || {}, chapters: chapters || [] });
     } finally {
       setOpeningId(null);
     }
@@ -202,7 +395,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
       setLoadError(null);
 
       try {
-        const { text, meta, annotations } = await parseFile(asset);
+        const { text, meta, annotations, chapters = [] } = await parseFile(asset);
         const words  = tokenize(text);
         if (!words.length) throw new Error("No readable text found. The file may be DRM-protected or in an unsupported format.");
         const bookId = makeBookId(asset.name);
@@ -224,6 +417,8 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
         await storage.setWords(bookId, words);
         if (Object.keys(annotations).length > 0)
           await storage.setAnnotations(bookId, annotations);
+        if (chapters.length > 0)
+          await storage.setChapters(bookId, chapters);
 
         setBooks(prev => {
           const idx = prev.findIndex(b => b.id === bookId);
@@ -232,7 +427,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
         });
 
         // Auto-open immediately after adding
-        onOpenBook({ ...bookMeta, words, annotations });
+        onOpenBook({ ...bookMeta, words, annotations, chapters });
       } catch (err) {
         setLoadError(err.message);
         console.error("Parse error:", err);
@@ -264,6 +459,52 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
     );
   }, []);
 
+  // ── import from local path ───────────────────────────────────────────────────
+
+  const importedIds = useMemo(() => new Set(books.map(b => b.id)), [books]);
+
+  const importLocalBook = useCallback(async (item) => {
+    setLoading(true);
+    setLoadingName(item.name);
+    setLoadError(null);
+    try {
+      const asset = { uri: item.path, name: item.name };
+      const { text, meta, annotations, chapters = [] } = await parseFile(asset);
+      const words = tokenize(text);
+      if (!words.length) throw new Error("No readable text found. The file may be DRM-protected.");
+      const bookId = makeBookId(item.name);
+      const bookMeta = {
+        id:           bookId,
+        title:        meta.title  || item.name.replace(/\.[^.]+$/, ""),
+        author:       meta.author || "",
+        format:       item.format,
+        coverDataUrl: meta.coverDataUrl || null,
+        wordCount:    words.length,
+        lastPosition: 0,
+        addedAt:      Date.now(),
+        calibreId:    null,
+      };
+      await storage.upsertBook(bookMeta);
+      await storage.setWords(bookId, words);
+      if (Object.keys(annotations).length > 0)
+        await storage.setAnnotations(bookId, annotations);
+      if (chapters.length > 0)
+        await storage.setChapters(bookId, chapters);
+      setBooks(prev => {
+        const idx = prev.findIndex(b => b.id === bookId);
+        if (idx >= 0) { const u = [...prev]; u[idx] = bookMeta; return u; }
+        return [bookMeta, ...prev];
+      });
+      setShowFolders(false);
+      onOpenBook({ ...bookMeta, words, annotations, chapters });
+    } catch (err) {
+      Alert.alert("Import Failed", err.message);
+    } finally {
+      setLoading(false);
+      setLoadingName("");
+    }
+  }, [onOpenBook]);
+
   // ── import from Calibre ──────────────────────────────────────────────────────
 
   const importCalibreBook = useCallback(async ({ uri, name, title, author, coverDataUrl, calibreId }) => {
@@ -280,7 +521,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
       }
       const assetName = name || `${title}.epub`;
       const asset  = { uri: parseUri, name: assetName };
-      const { text, meta, annotations } = await parseFile(asset);
+      const { text, meta, annotations, chapters = [] } = await parseFile(asset);
       if (Platform.OS === "web" && parseUri !== uri) URL.revokeObjectURL(parseUri);
       const words  = tokenize(text);
       if (!words.length) throw new Error("No readable text found. The file may be DRM-protected or in an unsupported format.");
@@ -303,6 +544,8 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
       await storage.setWords(bookId, words);
       if (Object.keys(annotations).length > 0)
         await storage.setAnnotations(bookId, annotations);
+      if (chapters.length > 0)
+        await storage.setChapters(bookId, chapters);
 
       setBooks(prev => {
         const idx = prev.findIndex(b => b.id === bookId);
@@ -311,7 +554,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
       });
 
       setShowCalibre(false);
-      onOpenBook({ ...bookMeta, words, annotations });
+      onOpenBook({ ...bookMeta, words, annotations, chapters });
     } catch (err) {
       Alert.alert("Import Failed", err.message);
     } finally {
@@ -350,6 +593,14 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
         <Text style={[cs.logo, { color: t.accent, fontFamily: MONO }]}>⚡ SwiftRead</Text>
         <View style={cs.headerRight}>
           <ThemeDropdown theme={theme} onChange={onChangeTheme} t={t} />
+          <TouchableOpacity
+            style={[cs.iconBtn, { borderColor: t.muted + "88" }]}
+            onPress={() => setShowFolders(true)}
+          >
+            <Text style={{ color: t.muted, fontSize: 11, fontFamily: MONO, letterSpacing: 1 }}>
+              Folders
+            </Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[cs.iconBtn, { borderColor: t.muted + "88" }]}
             onPress={() => setShowCalibre(true)}
@@ -492,6 +743,13 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
         </>
       )}
 
+      <LocalFoldersModal
+        visible={showFolders}
+        onClose={() => setShowFolders(false)}
+        t={t}
+        importedIds={importedIds}
+        onImport={importLocalBook}
+      />
       <CalibreModal
         visible={showCalibre}
         onClose={() => setShowCalibre(false)}
@@ -506,7 +764,7 @@ export default function Library({ theme, onChangeTheme, onOpenBook }) {
 // ── styles ────────────────────────────────────────────────────────────────────
 
 const cs = StyleSheet.create({
-  safe:   { flex: 1 },
+  safe:   { flex: 1, paddingTop: Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0 },
   header: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
     paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1,
@@ -599,6 +857,10 @@ const cs = StyleSheet.create({
   },
   pctText: { fontSize: 10, letterSpacing: 1 },
 
+  folderRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    borderWidth: 1, borderRadius: 8, padding: 10,
+  },
   openingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.4)",
